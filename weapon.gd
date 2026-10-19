@@ -6,8 +6,7 @@ const STARTING_RESERVE: int = 30
 const MAX_RANGE: float = 90.0
 const SHOT_INTERVAL: float = 0.55
 const RELOAD_DURATION: float = 1.8
-const BOLT_CYCLE_DURATION: float = 0.80
-const BoltVisualRig = preload("res://weapon_bolt.gd")
+const BOLT_CYCLE_DURATION: float = 0.44
 const CASE_EJECTION_DURATION: float = 0.38
 const HIP_POSITION: Vector3 = Vector3(0.30, -0.28, -0.56)
 const AIM_POSITION: Vector3 = Vector3(0.0, -0.15, -0.48)
@@ -38,16 +37,12 @@ var recoil_pitch: float = 0.0
 var muzzle_timer: float = 0.0
 var walk_cycle: float = 0.0
 var bolt_cycle_timer: float = 0.0
-var auto_reload_pending: bool = false
-var case_ejection_pending: bool = false
 var case_ejection_timer: float = 0.0
 var case_visual: MeshInstance3D
 var rifle_instance: Node3D
 var active_texture_size: int = 2
-var bolt_visual_rig: BoltVisualRig
 
 func _ready() -> void:
-	bolt_visual_rig = BoltVisualRig.new()
 	position = HIP_POSITION
 	muzzle_flash.visible = false
 	# Quando o GLB estiver presente, troca somente o visual do rifle.
@@ -66,11 +61,6 @@ func request_fire() -> void:
 func request_reload() -> void:
 	if reloading or magazine == MAGAZINE_SIZE or reserve_ammo <= 0:
 		return
-	# Nao iniciar recarga no meio do ciclo de extracao do estojo.
-	if bolt_cycle_timer > 0.0:
-		auto_reload_pending = true
-		return
-	auto_reload_pending = false
 	reloading = true
 	reload_timer = RELOAD_DURATION
 	reload_audio.play()
@@ -79,9 +69,6 @@ func request_reload() -> void:
 func _physics_process(delta: float) -> void:
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	bolt_cycle_timer = maxf(0.0, bolt_cycle_timer - delta)
-	if auto_reload_pending and bolt_cycle_timer <= 0.0:
-		auto_reload_pending = false
-		request_reload()
 
 	if reloading:
 		reload_timer -= delta
@@ -94,7 +81,7 @@ func _physics_process(delta: float) -> void:
 
 	if pending_shot:
 		pending_shot = false
-		if not reloading and shot_cooldown <= 0.0 and bolt_cycle_timer <= 0.0 and magazine > 0:
+		if not reloading and shot_cooldown <= 0.0 and magazine > 0:
 			_fire_hitscan()
 
 func _process(delta: float) -> void:
@@ -129,24 +116,17 @@ func _process(delta: float) -> void:
 		if muzzle_timer <= 0.0:
 			muzzle_flash.visible = false
 
-	# O estojo sai somente durante a abertura do ferrolho, nao no instante do tiro.
-	if case_ejection_pending and bolt_cycle_timer > 0.0 and cycle_progress >= 0.37:
-		case_ejection_pending = false
-		case_ejection_timer = CASE_EJECTION_DURATION
 	if case_visual != null:
 		_update_cartridge_case(delta)
-	if bolt_visual_rig != null and rifle_instance != null:
-		bolt_visual_rig.animate(cycle_progress if bolt_cycle_timer > 0.0 else 1.0)
 	crosshair.visible = not aiming
 
 func _fire_hitscan() -> void:
 	magazine -= 1
 	shot_cooldown = SHOT_INTERVAL
 	bolt_cycle_timer = BOLT_CYCLE_DURATION
-	case_ejection_timer = 0.0
-	case_ejection_pending = true
+	case_ejection_timer = CASE_EJECTION_DURATION
 	if case_visual != null:
-		case_visual.visible = false
+		case_visual.visible = true
 	recoil = 0.10
 	recoil_pitch = 0.14
 	muzzle_timer = 0.07
@@ -169,15 +149,12 @@ func _fire_hitscan() -> void:
 	# A recarga inicia apos o ultimo disparo, sem exigir R.
 	# Se nao houver municao na reserva, o HUD informa carregador vazio.
 	if magazine == 0 and reserve_ammo > 0:
-		auto_reload_pending = true
-		_update_hud()
+		request_reload()
 
 func _update_hud() -> void:
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]
 	if reloading:
 		ammo_label.text += "  RECARREGANDO..."
-	elif auto_reload_pending:
-		ammo_label.text += "  OPERANDO FERROLHO..."
 	elif magazine == 0 and reserve_ammo == 0:
 		ammo_label.text += "  SEM MUNICAO"
 
@@ -308,8 +285,6 @@ func _equip_real_rifle(texture_size: int = 2) -> bool:
 	# O arquivo distribuido ja esta normalizado para cerca de 1,11 m.
 	# Eixo da boca do cano: -Z, alinhado com a camera do FPS.
 	# Nao escalar novamente, pois o glTF original tinha escala de exportacao 100x.
-	if bolt_visual_rig != null:
-		bolt_visual_rig.reset()
 	replacement.name = "LeeEnfield3D"
 	add_child(replacement)
 	replacement.position = Vector3(0.0, 0.085, -0.55)
@@ -317,8 +292,6 @@ func _equip_real_rifle(texture_size: int = 2) -> bool:
 		rifle_instance.queue_free()
 	rifle_instance = replacement
 	active_texture_size = texture_size
-	if bolt_visual_rig != null:
-		bolt_visual_rig.bind_to(rifle_instance)
 
 	# Oculta somente malhas antigas. Audio e muzzle flash continuam ativos.
 	for child in get_children():

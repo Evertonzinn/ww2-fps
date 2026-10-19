@@ -5,6 +5,7 @@
 [ext_resource type="Script" path="res://target.gd" id="3_target"]
 [ext_resource type="Script" path="res://world_props.gd" id="4_world"]
 [ext_resource type="Script" path="res://hud.gd" id="5_hud"]
+[ext_resource type="Script" path="res://graphics_menu.gd" id="6_graphics"]
 
 [sub_resource type="BoxMesh" id="GroundMesh"]
 size = Vector3(40, 1, 40)
@@ -244,3 +245,7 @@ theme_override_colors/font_color = Color(0.16, 0.25, 0.12, 1)
 theme_override_font_sizes/font_size = 17
 text = "ACERTO!"
 horizontal_alignment = 1
+
+[node name="GraphicsMenu" type="CanvasLayer" parent="."]
+layer = 10
+script = ExtResource("6_graphics")

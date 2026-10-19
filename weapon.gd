@@ -6,6 +6,8 @@ const STARTING_RESERVE: int = 30
 const MAX_RANGE: float = 90.0
 const SHOT_INTERVAL: float = 0.55
 const RELOAD_DURATION: float = 1.8
+const BOLT_CYCLE_DURATION: float = 0.44
+const CASE_EJECTION_DURATION: float = 0.38
 const HIP_POSITION: Vector3 = Vector3(0.30, -0.28, -0.56)
 const AIM_POSITION: Vector3 = Vector3(0.0, -0.15, -0.48)
 const HIP_FOV: float = 75.0
@@ -34,6 +36,11 @@ var recoil: float = 0.0
 var recoil_pitch: float = 0.0
 var muzzle_timer: float = 0.0
 var walk_cycle: float = 0.0
+var bolt_cycle_timer: float = 0.0
+var case_ejection_timer: float = 0.0
+var case_visual: MeshInstance3D
+var rifle_instance: Node3D
+var active_texture_size: int = 2
 
 func _ready() -> void:
 	position = HIP_POSITION
@@ -43,6 +50,7 @@ func _ready() -> void:
 	if not _equip_real_rifle():
 		_build_rifle_details()
 		_build_stock_mesh()
+	_create_cartridge_case()
 	shot_audio.stream = _create_placeholder_sound(true)
 	reload_audio.stream = _create_placeholder_sound(false)
 	_update_hud()
@@ -60,6 +68,7 @@ func request_reload() -> void:
 
 func _physics_process(delta: float) -> void:
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
+	bolt_cycle_timer = maxf(0.0, bolt_cycle_timer - delta)
 
 	if reloading:
 		reload_timer -= delta
@@ -88,13 +97,16 @@ func _process(delta: float) -> void:
 	var bob_y: float = abs(cos(walk_cycle)) * 0.010 * bob_scale if moving else 0.0
 
 	var target_pos: Vector3 = AIM_POSITION if aiming else HIP_POSITION
-	target_pos += Vector3(bob_x, bob_y, recoil)
+	var cycle_progress: float = 1.0 - bolt_cycle_timer / BOLT_CYCLE_DURATION
+	var bolt_pull: float = sin(cycle_progress * PI) * 0.038 if bolt_cycle_timer > 0.0 else 0.0
+	target_pos += Vector3(bob_x + bolt_pull * 0.45, bob_y, recoil + bolt_pull)
 	if reloading:
 		target_pos = HIP_POSITION + Vector3(0.08, -0.22, 0.04)
 
 	position = position.lerp(target_pos, minf(1.0, delta * 12.0))
 	rotation.x = lerpf(rotation.x, -0.32 if reloading else recoil_pitch, minf(1.0, delta * 13.0))
-	rotation.z = lerpf(rotation.z, sin(walk_cycle) * 0.018 if moving else 0.0, minf(1.0, delta * 8.0))
+	var cycle_roll: float = sin(cycle_progress * PI) * 0.065 if bolt_cycle_timer > 0.0 else 0.0
+	rotation.z = lerpf(rotation.z, (sin(walk_cycle) * 0.018 if moving else 0.0) + cycle_roll, minf(1.0, delta * 8.0))
 	view_camera.fov = lerpf(view_camera.fov, AIM_FOV if aiming else HIP_FOV, minf(1.0, delta * 10.0))
 	recoil = move_toward(recoil, 0.0, delta * 0.75)
 	recoil_pitch = move_toward(recoil_pitch, 0.0, delta * 2.2)
@@ -104,11 +116,17 @@ func _process(delta: float) -> void:
 		if muzzle_timer <= 0.0:
 			muzzle_flash.visible = false
 
+	if case_visual != null:
+		_update_cartridge_case(delta)
 	crosshair.visible = not aiming
 
 func _fire_hitscan() -> void:
 	magazine -= 1
 	shot_cooldown = SHOT_INTERVAL
+	bolt_cycle_timer = BOLT_CYCLE_DURATION
+	case_ejection_timer = CASE_EJECTION_DURATION
+	if case_visual != null:
+		case_visual.visible = true
 	recoil = 0.10
 	recoil_pitch = 0.14
 	muzzle_timer = 0.07
@@ -128,10 +146,17 @@ func _fire_hitscan() -> void:
 			target.call("take_damage", 1)
 			hud.call("show_hit_marker")
 
+	# A recarga inicia apos o ultimo disparo, sem exigir R.
+	# Se nao houver municao na reserva, o HUD informa carregador vazio.
+	if magazine == 0 and reserve_ammo > 0:
+		request_reload()
+
 func _update_hud() -> void:
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]
 	if reloading:
 		ammo_label.text += "  RECARREGANDO..."
+	elif magazine == 0 and reserve_ammo == 0:
+		ammo_label.text += "  SEM MUNICAO"
 
 # Efeito sonoro sintetizado apenas como placeholder; sem dependencia de arquivos/licencas.
 func _create_placeholder_sound(is_shot: bool) -> AudioStreamWAV:
@@ -242,26 +267,31 @@ func _stock_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -
 	surface.set_uv(Vector2(0.5, 1))
 	surface.add_vertex(c)
 
-func _equip_real_rifle() -> bool:
-	if not ResourceLoader.exists(RIFLE_3D_PATH):
+func _equip_real_rifle(texture_size: int = 2) -> bool:
+	var model_path: String = "res://assets/weapons/lee_enfield/lee_enfield_%dk.glb" % texture_size
+	if not ResourceLoader.exists(model_path):
 		return false
 
-	var imported_scene: PackedScene = ResourceLoader.load(RIFLE_3D_PATH) as PackedScene
+	var imported_scene: PackedScene = ResourceLoader.load(model_path) as PackedScene
 	if imported_scene == null:
 		push_warning("Lee-Enfield: modelo 3D invalido. Mantendo rifle anterior.")
 		return false
 
-	var rifle_instance: Node3D = imported_scene.instantiate() as Node3D
-	if rifle_instance == null:
+	var replacement: Node3D = imported_scene.instantiate() as Node3D
+	if replacement == null:
 		push_warning("Lee-Enfield: o GLB nao tem raiz Node3D. Mantendo rifle anterior.")
 		return false
 
 	# O arquivo distribuido ja esta normalizado para cerca de 1,11 m.
 	# Eixo da boca do cano: -Z, alinhado com a camera do FPS.
 	# Nao escalar novamente, pois o glTF original tinha escala de exportacao 100x.
-	rifle_instance.name = "LeeEnfield3D"
-	add_child(rifle_instance)
-	rifle_instance.position = Vector3(0.0, 0.085, -0.55)
+	replacement.name = "LeeEnfield3D"
+	add_child(replacement)
+	replacement.position = Vector3(0.0, 0.085, -0.55)
+	if rifle_instance != null:
+		rifle_instance.queue_free()
+	rifle_instance = replacement
+	active_texture_size = texture_size
 
 	# Oculta somente malhas antigas. Audio e muzzle flash continuam ativos.
 	for child in get_children():
@@ -270,3 +300,40 @@ func _equip_real_rifle() -> bool:
 
 	muzzle_flash.position = Vector3(0.0, 0.085, -1.13)
 	return true
+
+# Troca 1K/2K sem interferir no controlador de dano e sem alterar o asset original.
+func set_texture_quality(high_quality: bool) -> bool:
+	var requested_size: int = 2 if high_quality else 1
+	if rifle_instance != null and active_texture_size == requested_size:
+		return true
+	return _equip_real_rifle(requested_size)
+
+# Feedback de ejeção de estojo e ciclo visual do ferrolho.
+# O GLB não possui animações e seus nomes não indicam qual malha é o ferrolho:
+# preservamos todas as 44 malhas para não mover uma peça errada.
+func _create_cartridge_case() -> void:
+	case_visual = MeshInstance3D.new()
+	case_visual.name = "CartridgeEjection"
+	var case_mesh: CylinderMesh = CylinderMesh.new()
+	case_mesh.top_radius = 0.013
+	case_mesh.bottom_radius = 0.013
+	case_mesh.height = 0.065
+	case_mesh.radial_segments = 8
+	case_visual.mesh = case_mesh
+	var brass: StandardMaterial3D = StandardMaterial3D.new()
+	brass.albedo_color = Color(0.64, 0.44, 0.12)
+	brass.metallic = 0.52
+	brass.roughness = 0.42
+	case_visual.material_override = brass
+	case_visual.visible = false
+	add_child(case_visual)
+
+func _update_cartridge_case(delta: float) -> void:
+	if case_ejection_timer <= 0.0:
+		case_visual.visible = false
+		return
+	case_ejection_timer = maxf(0.0, case_ejection_timer - delta)
+	var progress: float = 1.0 - case_ejection_timer / CASE_EJECTION_DURATION
+	case_visual.position = Vector3(0.13 + progress * 0.22, 0.13 + sin(progress * PI) * 0.16, -0.31 + progress * 0.13)
+	case_visual.rotation.z = progress * PI * 2.0
+	case_visual.visible = case_ejection_timer > 0.0

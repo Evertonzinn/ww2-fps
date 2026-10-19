@@ -8,6 +8,7 @@ const MOUSE_SENSITIVITY: float = 0.002
 
 @onready var head: Node3D = $Head
 @onready var weapon: WeaponController = $Head/Camera3D/Weapon
+@onready var graphics_menu: GraphicsSettingsMenu = $"../GraphicsMenu"
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -20,9 +21,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+			graphics_menu.open_menu()
 		elif event.keycode == KEY_R and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 			weapon.request_reload()
+
+	if graphics_menu.is_open:
+		return
 
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:

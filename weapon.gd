@@ -77,6 +77,12 @@ func request_reload() -> void:
 func _physics_process(delta: float) -> void:
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	bolt_cycle_timer = maxf(0.0, bolt_cycle_timer - delta)
+	# Safety: prevent a looping import from playing beyond one shot.
+	if bolt_cycle_timer <= 0.0 and bolt_player != null and bolt_player.is_playing() and bolt_clip != &"":
+		bolt_player.stop(true)
+		var finished_clip: Animation = bolt_player.get_animation(bolt_clip)
+		if finished_clip != null:
+			bolt_player.seek(finished_clip.length, true)
 	if case_ejection_pending and bolt_cycle_timer <= BOLT_CYCLE_DURATION * 0.57:
 		case_ejection_pending = false
 		case_ejection_timer = CASE_EJECTION_DURATION
@@ -286,9 +292,14 @@ func _stock_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -
 	surface.add_vertex(c)
 
 func _equip_real_rifle(texture_size: int = 2) -> bool:
+	var once_path: String = "res://assets/weapons/lee_enfield/lee_enfield_rigged_once_%dk.glb" % texture_size
 	var rigged_path: String = "res://assets/weapons/lee_enfield/lee_enfield_rigged_%dk.glb" % texture_size
 	var old_path: String = "res://assets/weapons/lee_enfield/lee_enfield_%dk.glb" % texture_size
-	var model_path: String = rigged_path if ResourceLoader.exists(rigged_path) else old_path
+	var model_path: String = old_path
+	if ResourceLoader.exists(once_path):
+		model_path = once_path
+	elif ResourceLoader.exists(rigged_path):
+		model_path = rigged_path
 	if not ResourceLoader.exists(model_path):
 		return false
 
@@ -372,9 +383,16 @@ func _bind_bolt_animation() -> void:
 		if candidate == null:
 			continue
 		for item in candidate.get_animation_list():
-			if String(item).ends_with("BoltCycle"):
+			var clip_name: String = String(item)
+			if clip_name.ends_with("BoltAction_Once") or clip_name.ends_with("BoltCycle"):
+				var imported_clip: Animation = candidate.get_animation(item)
+				if imported_clip == null:
+					continue
+				# The suffix Cycle triggers loop on glTF import. Force one-shot even for old GLBs.
+				imported_clip.loop_mode = Animation.LOOP_NONE
 				bolt_player = candidate
 				bolt_clip = StringName(item)
-				print("Lee-Enfield: GLB BoltCycle importado: ", String(item))
+				bolt_player.stop(true)
+				print("Lee-Enfield: one-shot bolt animation ready: ", clip_name, " | loop_mode=", imported_clip.loop_mode)
 				return
-	push_warning("Lee-Enfield: sem BoltCycle no GLB; usando rifle estatico e recarga habitual.")
+	push_warning("Lee-Enfield: no bolt animation found in GLB. Rifle and automatic reload remain active.")

@@ -38,6 +38,8 @@ var recoil_pitch: float = 0.0
 var muzzle_timer: float = 0.0
 var walk_cycle: float = 0.0
 var bolt_cycle_timer: float = 0.0
+var auto_reload_pending: bool = false
+var case_ejection_pending: bool = false
 var case_ejection_timer: float = 0.0
 var case_visual: MeshInstance3D
 var rifle_instance: Node3D
@@ -64,6 +66,11 @@ func request_fire() -> void:
 func request_reload() -> void:
 	if reloading or magazine == MAGAZINE_SIZE or reserve_ammo <= 0:
 		return
+	# Nao iniciar recarga no meio do ciclo de extracao do estojo.
+	if bolt_cycle_timer > 0.0:
+		auto_reload_pending = true
+		return
+	auto_reload_pending = false
 	reloading = true
 	reload_timer = RELOAD_DURATION
 	reload_audio.play()
@@ -72,6 +79,9 @@ func request_reload() -> void:
 func _physics_process(delta: float) -> void:
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	bolt_cycle_timer = maxf(0.0, bolt_cycle_timer - delta)
+	if auto_reload_pending and bolt_cycle_timer <= 0.0:
+		auto_reload_pending = false
+		request_reload()
 
 	if reloading:
 		reload_timer -= delta
@@ -84,7 +94,7 @@ func _physics_process(delta: float) -> void:
 
 	if pending_shot:
 		pending_shot = false
-		if not reloading and shot_cooldown <= 0.0 and magazine > 0:
+		if not reloading and shot_cooldown <= 0.0 and bolt_cycle_timer <= 0.0 and magazine > 0:
 			_fire_hitscan()
 
 func _process(delta: float) -> void:
@@ -119,6 +129,10 @@ func _process(delta: float) -> void:
 		if muzzle_timer <= 0.0:
 			muzzle_flash.visible = false
 
+	# O estojo sai somente durante a abertura do ferrolho, nao no instante do tiro.
+	if case_ejection_pending and bolt_cycle_timer > 0.0 and cycle_progress >= 0.37:
+		case_ejection_pending = false
+		case_ejection_timer = CASE_EJECTION_DURATION
 	if case_visual != null:
 		_update_cartridge_case(delta)
 	if bolt_visual_rig != null and rifle_instance != null:
@@ -129,9 +143,10 @@ func _fire_hitscan() -> void:
 	magazine -= 1
 	shot_cooldown = SHOT_INTERVAL
 	bolt_cycle_timer = BOLT_CYCLE_DURATION
-	case_ejection_timer = CASE_EJECTION_DURATION
+	case_ejection_timer = 0.0
+	case_ejection_pending = true
 	if case_visual != null:
-		case_visual.visible = true
+		case_visual.visible = false
 	recoil = 0.10
 	recoil_pitch = 0.14
 	muzzle_timer = 0.07
@@ -154,12 +169,14 @@ func _fire_hitscan() -> void:
 	# A recarga inicia apos o ultimo disparo, sem exigir R.
 	# Se nao houver municao na reserva, o HUD informa carregador vazio.
 	if magazine == 0 and reserve_ammo > 0:
-		request_reload()
+		auto_reload_pending = true
 
 func _update_hud() -> void:
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]
 	if reloading:
 		ammo_label.text += "  RECARREGANDO..."
+	elif auto_reload_pending:
+		ammo_label.text += "  OPERANDO FERROLHO..."
 	elif magazine == 0 and reserve_ammo == 0:
 		ammo_label.text += "  SEM MUNICAO"
 

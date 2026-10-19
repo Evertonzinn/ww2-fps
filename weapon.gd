@@ -11,6 +11,10 @@ const AIM_POSITION: Vector3 = Vector3(0.0, -0.15, -0.48)
 const HIP_FOV: float = 75.0
 const AIM_FOV: float = 55.0
 
+# Arquivo de asset instalado localmente; a v0.5 continua funcional sem ele.
+# Escolha lee_enfield_1k.glb para reduzir o uso de VRAM na GT 730.
+const RIFLE_3D_PATH: String = "res://assets/weapons/lee_enfield/lee_enfield_2k.glb"
+
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
 @onready var hud: CanvasLayer = get_tree().current_scene.get_node("HUD") as CanvasLayer
@@ -34,8 +38,11 @@ var walk_cycle: float = 0.0
 func _ready() -> void:
 	position = HIP_POSITION
 	muzzle_flash.visible = false
-	_build_rifle_details()
-	_build_stock_mesh()
+	# Quando o GLB estiver presente, troca somente o visual do rifle.
+	# Raycast, ADS, carregador, dano e HUD permanecem inalterados.
+	if not _equip_real_rifle():
+		_build_rifle_details()
+		_build_stock_mesh()
 	shot_audio.stream = _create_placeholder_sound(true)
 	reload_audio.stream = _create_placeholder_sound(false)
 	_update_hud()
@@ -234,3 +241,32 @@ func _stock_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -
 	surface.add_vertex(b)
 	surface.set_uv(Vector2(0.5, 1))
 	surface.add_vertex(c)
+
+func _equip_real_rifle() -> bool:
+	if not ResourceLoader.exists(RIFLE_3D_PATH):
+		return false
+
+	var imported_scene: PackedScene = ResourceLoader.load(RIFLE_3D_PATH) as PackedScene
+	if imported_scene == null:
+		push_warning("Lee-Enfield: modelo 3D invalido. Mantendo rifle anterior.")
+		return false
+
+	var rifle_instance: Node3D = imported_scene.instantiate() as Node3D
+	if rifle_instance == null:
+		push_warning("Lee-Enfield: o GLB nao tem raiz Node3D. Mantendo rifle anterior.")
+		return false
+
+	# O arquivo distribuido ja esta normalizado para cerca de 1,11 m.
+	# Eixo da boca do cano: -Z, alinhado com a camera do FPS.
+	# Nao escalar novamente, pois o glTF original tinha escala de exportacao 100x.
+	rifle_instance.name = "LeeEnfield3D"
+	add_child(rifle_instance)
+	rifle_instance.position = Vector3(0.0, 0.085, -0.55)
+
+	# Oculta somente malhas antigas. Audio e muzzle flash continuam ativos.
+	for child in get_children():
+		if child is MeshInstance3D and child != muzzle_flash:
+			(child as MeshInstance3D).visible = false
+
+	muzzle_flash.position = Vector3(0.0, 0.085, -1.13)
+	return true

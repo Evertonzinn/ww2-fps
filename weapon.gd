@@ -6,7 +6,7 @@ const STARTING_RESERVE: int = 30
 const MAX_RANGE: float = 90.0
 const SHOT_INTERVAL: float = 0.55
 const RELOAD_DURATION: float = 1.8
-const BOLT_CYCLE_DURATION: float = 0.44
+const BOLT_CYCLE_DURATION: float = 0.86
 const CASE_EJECTION_DURATION: float = 0.38
 const HIP_POSITION: Vector3 = Vector3(0.30, -0.28, -0.56)
 const AIM_POSITION: Vector3 = Vector3(0.0, -0.15, -0.48)
@@ -15,7 +15,6 @@ const AIM_FOV: float = 55.0
 
 # Arquivo de asset instalado localmente; a v0.5 continua funcional sem ele.
 # Escolha lee_enfield_1k.glb para reduzir o uso de VRAM na GT 730.
-const RIFLE_3D_PATH: String = "res://assets/weapons/lee_enfield/lee_enfield_2k.glb"
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -41,6 +40,10 @@ var case_ejection_timer: float = 0.0
 var case_visual: MeshInstance3D
 var rifle_instance: Node3D
 var active_texture_size: int = 2
+var bolt_player: AnimationPlayer
+var bolt_clip: StringName = &""
+var auto_reload_pending: bool = false
+var case_ejection_pending: bool = false
 
 func _ready() -> void:
 	position = HIP_POSITION
@@ -61,6 +64,11 @@ func request_fire() -> void:
 func request_reload() -> void:
 	if reloading or magazine == MAGAZINE_SIZE or reserve_ammo <= 0:
 		return
+	if bolt_player != null and bolt_cycle_timer > 0.0:
+		auto_reload_pending = true
+		_update_hud()
+		return
+	auto_reload_pending = false
 	reloading = true
 	reload_timer = RELOAD_DURATION
 	reload_audio.play()
@@ -69,6 +77,12 @@ func request_reload() -> void:
 func _physics_process(delta: float) -> void:
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	bolt_cycle_timer = maxf(0.0, bolt_cycle_timer - delta)
+	if case_ejection_pending and bolt_cycle_timer <= BOLT_CYCLE_DURATION * 0.57:
+		case_ejection_pending = false
+		case_ejection_timer = CASE_EJECTION_DURATION
+	if auto_reload_pending and bolt_cycle_timer <= 0.0:
+		auto_reload_pending = false
+		request_reload()
 
 	if reloading:
 		reload_timer -= delta
@@ -81,7 +95,7 @@ func _physics_process(delta: float) -> void:
 
 	if pending_shot:
 		pending_shot = false
-		if not reloading and shot_cooldown <= 0.0 and magazine > 0:
+		if not reloading and shot_cooldown <= 0.0 and (bolt_player == null or bolt_cycle_timer <= 0.0) and magazine > 0:
 			_fire_hitscan()
 
 func _process(delta: float) -> void:
@@ -97,16 +111,13 @@ func _process(delta: float) -> void:
 	var bob_y: float = abs(cos(walk_cycle)) * 0.010 * bob_scale if moving else 0.0
 
 	var target_pos: Vector3 = AIM_POSITION if aiming else HIP_POSITION
-	var cycle_progress: float = 1.0 - bolt_cycle_timer / BOLT_CYCLE_DURATION
-	var bolt_pull: float = sin(cycle_progress * PI) * 0.038 if bolt_cycle_timer > 0.0 else 0.0
-	target_pos += Vector3(bob_x + bolt_pull * 0.45, bob_y, recoil + bolt_pull)
+	target_pos += Vector3(bob_x, bob_y, recoil)
 	if reloading:
 		target_pos = HIP_POSITION + Vector3(0.08, -0.22, 0.04)
 
 	position = position.lerp(target_pos, minf(1.0, delta * 12.0))
 	rotation.x = lerpf(rotation.x, -0.32 if reloading else recoil_pitch, minf(1.0, delta * 13.0))
-	var cycle_roll: float = sin(cycle_progress * PI) * 0.065 if bolt_cycle_timer > 0.0 else 0.0
-	rotation.z = lerpf(rotation.z, (sin(walk_cycle) * 0.018 if moving else 0.0) + cycle_roll, minf(1.0, delta * 8.0))
+	rotation.z = lerpf(rotation.z, sin(walk_cycle) * 0.018 if moving else 0.0, minf(1.0, delta * 8.0))
 	view_camera.fov = lerpf(view_camera.fov, AIM_FOV if aiming else HIP_FOV, minf(1.0, delta * 10.0))
 	recoil = move_toward(recoil, 0.0, delta * 0.75)
 	recoil_pitch = move_toward(recoil_pitch, 0.0, delta * 2.2)
@@ -123,10 +134,15 @@ func _process(delta: float) -> void:
 func _fire_hitscan() -> void:
 	magazine -= 1
 	shot_cooldown = SHOT_INTERVAL
-	bolt_cycle_timer = BOLT_CYCLE_DURATION
-	case_ejection_timer = CASE_EJECTION_DURATION
-	if case_visual != null:
-		case_visual.visible = true
+	if bolt_player != null and bolt_clip != &"":
+		bolt_cycle_timer = BOLT_CYCLE_DURATION
+		case_ejection_timer = 0.0
+		case_ejection_pending = true
+		bolt_player.play(bolt_clip)
+	else:
+		bolt_cycle_timer = 0.0
+		case_ejection_pending = false
+		case_ejection_timer = CASE_EJECTION_DURATION
 	recoil = 0.10
 	recoil_pitch = 0.14
 	muzzle_timer = 0.07
@@ -155,6 +171,8 @@ func _update_hud() -> void:
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]
 	if reloading:
 		ammo_label.text += "  RECARREGANDO..."
+	elif auto_reload_pending:
+		ammo_label.text += "  OPERANDO FERROLHO..."
 	elif magazine == 0 and reserve_ammo == 0:
 		ammo_label.text += "  SEM MUNICAO"
 
@@ -268,7 +286,9 @@ func _stock_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -
 	surface.add_vertex(c)
 
 func _equip_real_rifle(texture_size: int = 2) -> bool:
-	var model_path: String = "res://assets/weapons/lee_enfield/lee_enfield_%dk.glb" % texture_size
+	var rigged_path: String = "res://assets/weapons/lee_enfield/lee_enfield_rigged_%dk.glb" % texture_size
+	var old_path: String = "res://assets/weapons/lee_enfield/lee_enfield_%dk.glb" % texture_size
+	var model_path: String = rigged_path if ResourceLoader.exists(rigged_path) else old_path
 	if not ResourceLoader.exists(model_path):
 		return false
 
@@ -292,6 +312,7 @@ func _equip_real_rifle(texture_size: int = 2) -> bool:
 		rifle_instance.queue_free()
 	rifle_instance = replacement
 	active_texture_size = texture_size
+	_bind_bolt_animation()
 
 	# Oculta somente malhas antigas. Audio e muzzle flash continuam ativos.
 	for child in get_children():
@@ -337,3 +358,23 @@ func _update_cartridge_case(delta: float) -> void:
 	case_visual.position = Vector3(0.13 + progress * 0.22, 0.13 + sin(progress * PI) * 0.16, -0.31 + progress * 0.13)
 	case_visual.rotation.z = progress * PI * 2.0
 	case_visual.visible = case_ejection_timer > 0.0
+
+
+func _bind_bolt_animation() -> void:
+	bolt_player = null
+	bolt_clip = &""
+	if rifle_instance == null:
+		return
+	# Imported GLB AnimationPlayer drives native mesh nodes. No duplicate bolt.
+	var nodes: Array[Node] = rifle_instance.find_children("*", "AnimationPlayer", true, false)
+	for node in nodes:
+		var candidate: AnimationPlayer = node as AnimationPlayer
+		if candidate == null:
+			continue
+		for item in candidate.get_animation_list():
+			if String(item).ends_with("BoltCycle"):
+				bolt_player = candidate
+				bolt_clip = StringName(item)
+				print("Lee-Enfield: GLB BoltCycle importado: ", String(item))
+				return
+	push_warning("Lee-Enfield: sem BoltCycle no GLB; usando rifle estatico e recarga habitual.")

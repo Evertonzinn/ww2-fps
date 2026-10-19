@@ -34,6 +34,7 @@ var walk_cycle: float = 0.0
 func _ready() -> void:
 	position = HIP_POSITION
 	muzzle_flash.visible = false
+	_build_rifle_details()
 	shot_audio.stream = _create_placeholder_sound(true)
 	reload_audio.stream = _create_placeholder_sound(false)
 	_update_hud()
@@ -150,3 +151,30 @@ func _create_placeholder_sound(is_shot: bool) -> AudioStreamWAV:
 	stream.stereo = false
 	stream.data = raw
 	return stream
+
+
+func _build_rifle_details() -> void:
+	# Detalhes simples com material proprio; podem ser trocados por um GLB.
+	var stock_wood: StandardMaterial3D = StandardMaterial3D.new()
+	stock_wood.albedo_color = Color(0.30, 0.17, 0.085)
+	stock_wood.roughness = 0.86
+	var steel: StandardMaterial3D = StandardMaterial3D.new()
+	steel.albedo_color = Color(0.19, 0.20, 0.19)
+	steel.metallic = 0.42
+	steel.roughness = 0.63
+
+	_weapon_box("WoodHandguard", Vector3(0, 0.015, -0.60), Vector3(0.125, 0.10, 0.39), stock_wood)
+	_weapon_box("FrontBand", Vector3(0, 0.018, -0.81), Vector3(0.15, 0.115, 0.058), steel)
+	_weapon_box("ReceiverTop", Vector3(0, 0.075, -0.35), Vector3(0.11, 0.035, 0.27), steel)
+	_weapon_box("TriggerPlate", Vector3(0, -0.13, -0.20), Vector3(0.085, 0.035, 0.18), steel)
+	_weapon_box("ButtPlate", Vector3(0, -0.07, 0.49), Vector3(0.17, 0.15, 0.035), steel)
+
+func _weapon_box(node_name: String, local_position: Vector3, dimensions: Vector3, surface: Material) -> void:
+	var visual: MeshInstance3D = MeshInstance3D.new()
+	visual.name = node_name
+	var shape: BoxMesh = BoxMesh.new()
+	shape.size = dimensions
+	visual.mesh = shape
+	visual.material_override = surface
+	visual.position = local_position
+	add_child(visual)

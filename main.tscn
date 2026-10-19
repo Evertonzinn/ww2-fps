@@ -25,10 +25,10 @@ metallic = 0.35
 roughness = 0.55
 
 [sub_resource type="BoxMesh" id="RifleStockMesh"]
-size = Vector3(0.16, 0.13, 0.8)
+size = Vector3(0.14, 0.115, 0.76)
 
 [sub_resource type="BoxMesh" id="RifleReceiverMesh"]
-size = Vector3(0.14, 0.11, 0.28)
+size = Vector3(0.13, 0.10, 0.28)
 
 [sub_resource type="CylinderMesh" id="RifleBarrelMesh"]
 top_radius = 0.027
@@ -96,6 +96,7 @@ current = true
 fov = 75.0
 
 [node name="Weapon" type="Node3D" parent="Player/Head/Camera3D"]
+scale = Vector3(0.90, 0.90, 0.90)
 script = ExtResource("2_weapon")
 
 [node name="Stock" type="MeshInstance3D" parent="Player/Head/Camera3D/Weapon"]

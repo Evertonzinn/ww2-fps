@@ -16,7 +16,8 @@ func _process(delta: float) -> void:
 	fps_refresh_timer -= delta
 	if fps_refresh_timer <= 0.0:
 		fps_refresh_timer = FPS_REFRESH_SECONDS
-		fps_label.text = "FPS: %d" % Engine.get_frames_per_second()
+		var frames: int = Engine.get_frames_per_second()
+		fps_label.text = "FPS: %d | %.1f ms" % [frames, 1000.0 / float(maxi(frames, 1))]
 
 	if hit_timer > 0.0:
 		hit_timer -= delta

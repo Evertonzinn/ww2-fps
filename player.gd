@@ -1,0 +1,78 @@
+
+extends CharacterBody3D
+
+const WALK_SPEED: float = 5.0
+const RUN_SPEED: float = 8.0
+const JUMP_SPEED: float = 4.5
+const GRAVITY: float = 9.8
+const MOUSE_SENSITIVITY: float = 0.002
+
+@onready var head: Node3D = $Head
+
+func _ready() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
+
+			head.rotate_x(
+				-event.relative.y * MOUSE_SENSITIVITY
+			)
+
+			head.rotation.x = clamp(
+				head.rotation.x,
+				-1.4,
+				1.4
+			)
+
+	if event is InputEventKey:
+		if event.pressed and event.keycode == KEY_ESCAPE:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+	if event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _physics_process(delta: float) -> void:
+	# Gravidade e salto
+	if not is_on_floor():
+		velocity.y -= GRAVITY * delta
+	elif Input.is_key_pressed(KEY_SPACE):
+		velocity.y = JUMP_SPEED
+
+	# Movimentacao WASD
+	var input_dir := Vector2.ZERO
+
+	if Input.is_key_pressed(KEY_W):
+		input_dir.y -= 1.0
+
+	if Input.is_key_pressed(KEY_S):
+		input_dir.y += 1.0
+
+	if Input.is_key_pressed(KEY_A):
+		input_dir.x -= 1.0
+
+	if Input.is_key_pressed(KEY_D):
+		input_dir.x += 1.0
+
+	input_dir = input_dir.normalized()
+
+	var direction: Vector3 = (
+		transform.basis *
+		Vector3(input_dir.x, 0.0, input_dir.y)
+	).normalized()
+
+	# Caminhar ou correr
+	var speed: float = WALK_SPEED
+
+	if Input.is_key_pressed(KEY_SHIFT):
+		speed = RUN_SPEED
+
+	velocity.x = direction.x * speed
+	velocity.z = direction.z * speed
+
+	move_and_slide()

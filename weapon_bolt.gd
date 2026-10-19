@@ -3,7 +3,7 @@ extends RefCounted
 # Mesh names come from the license-compatible Lee-Enfield GLB supplied by the user.
 # Candidate parts on top of the action, measured in the actual model bounds.
 # Do not affect the stock, barrel, firing logic or bullets.
-const CANDIDATES: PackedStringArray = [
+const CANDIDATES = [
 	"Cube009Low",
 	"Cube010Low",
 	"Circle001Low"

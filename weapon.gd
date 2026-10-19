@@ -42,7 +42,7 @@ var case_ejection_timer: float = 0.0
 var case_visual: MeshInstance3D
 var rifle_instance: Node3D
 var active_texture_size: int = 2
-var bolt_visual_rig: RefCounted
+var bolt_visual_rig: BoltVisualRig
 
 func _ready() -> void:
 	bolt_visual_rig = BoltVisualRig.new()

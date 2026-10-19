@@ -170,6 +170,7 @@ func _fire_hitscan() -> void:
 	# Se nao houver municao na reserva, o HUD informa carregador vazio.
 	if magazine == 0 and reserve_ammo > 0:
 		auto_reload_pending = true
+		_update_hud()
 
 func _update_hud() -> void:
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]

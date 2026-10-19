@@ -4,7 +4,7 @@ extends RefCounted
 # Inspecao de bounding boxes no GLB 2K: Cube.008, Cube.009, Cube.010
 # e Circle.001 proximas ao topo da acao. Os nomes ainda nao certificam
 # uma divisao mecanicamente exata. Caso falte uma malha, nao animar parcialmente.
-const PART_NAMES: Array[String] = [
+const PART_NAMES = [
 	"Cube008Low",
 	"Cube009Low",
 	"Cube010Low",

@@ -3,6 +3,8 @@
 [ext_resource type="Script" uid="uid://cxe5t854p2sft" path="res://player.gd" id="1_player"]
 [ext_resource type="Script" path="res://weapon.gd" id="2_weapon"]
 [ext_resource type="Script" path="res://target.gd" id="3_target"]
+[ext_resource type="Script" path="res://world_props.gd" id="4_world"]
+[ext_resource type="Script" path="res://hud.gd" id="5_hud"]
 
 [sub_resource type="BoxMesh" id="GroundMesh"]
 size = Vector3(40, 1, 40)
@@ -36,6 +38,28 @@ height = 0.80
 [sub_resource type="BoxMesh" id="RifleSightMesh"]
 size = Vector3(0.055, 0.08, 0.035)
 
+[sub_resource type="StandardMaterial3D" id="FlashMaterial"]
+albedo_color = Color(1, 0.72, 0.2, 1)
+shading_mode = 0
+
+[sub_resource type="SphereMesh" id="FlashMesh"]
+radius = 0.095
+height = 0.19
+radial_segments = 8
+rings = 3
+
+[sub_resource type="BoxMesh" id="RifleGripMesh"]
+size = Vector3(0.12, 0.28, 0.13)
+
+[sub_resource type="BoxMesh" id="RearSightMesh"]
+size = Vector3(0.09, 0.085, 0.035)
+
+[sub_resource type="CylinderMesh" id="BoltMesh"]
+top_radius = 0.025
+bottom_radius = 0.025
+height = 0.23
+radial_segments = 8
+
 [sub_resource type="StandardMaterial3D" id="TargetMaterial"]
 albedo_color = Color(0.85, 0.15, 0.10, 1)
 
@@ -46,6 +70,7 @@ size = Vector3(1, 2, 0.4)
 size = Vector3(1, 2, 0.4)
 
 [node name="World" type="Node3D"]
+script = ExtResource("4_world")
 
 [node name="Ground" type="StaticBody3D" parent="."]
 position = Vector3(0, -0.5, 0)
@@ -94,6 +119,34 @@ position = Vector3(0, 0.06, -1.21)
 mesh = SubResource("RifleSightMesh")
 material_override = SubResource("RifleMetal")
 
+[node name="Grip" type="MeshInstance3D" parent="Player/Head/Camera3D/Weapon"]
+position = Vector3(0, -0.18, -0.24)
+mesh = SubResource("RifleGripMesh")
+material_override = SubResource("RifleWood")
+
+[node name="RearSight" type="MeshInstance3D" parent="Player/Head/Camera3D/Weapon"]
+position = Vector3(0, 0.075, -0.45)
+mesh = SubResource("RearSightMesh")
+material_override = SubResource("RifleMetal")
+
+[node name="BoltHandle" type="MeshInstance3D" parent="Player/Head/Camera3D/Weapon"]
+position = Vector3(0.14, 0.02, -0.32)
+rotation = Vector3(0, 0, 1.5707964)
+mesh = SubResource("BoltMesh")
+material_override = SubResource("RifleMetal")
+
+[node name="MuzzleFlash" type="MeshInstance3D" parent="Player/Head/Camera3D/Weapon"]
+visible = false
+position = Vector3(0, 0, -1.31)
+mesh = SubResource("FlashMesh")
+material_override = SubResource("FlashMaterial")
+
+[node name="ShotAudio" type="AudioStreamPlayer" parent="Player/Head/Camera3D/Weapon"]
+volume_db = -9.0
+
+[node name="ReloadAudio" type="AudioStreamPlayer" parent="Player/Head/Camera3D/Weapon"]
+volume_db = -12.0
+
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 rotation = Vector3(-0.7853982, 0, 0)
 
@@ -131,6 +184,7 @@ material_override = SubResource("TargetMaterial")
 shape = SubResource("TargetShape")
 
 [node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("5_hud")
 
 [node name="Crosshair" type="Label" parent="HUD"]
 anchors_preset = 8
@@ -164,3 +218,28 @@ theme_override_colors/font_color = Color(0.1, 0.1, 0.1, 1)
 theme_override_font_sizes/font_size = 20
 text = "5 / 30"
 horizontal_alignment = 2
+
+[node name="FpsLabel" type="Label" parent="HUD"]
+offset_left = 12.0
+offset_top = 10.0
+offset_right = 180.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(0.12, 0.13, 0.12, 1)
+theme_override_font_sizes/font_size = 18
+text = "FPS: --"
+
+[node name="HitMarker" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -50.0
+offset_top = 28.0
+offset_right = 50.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(0.16, 0.25, 0.12, 1)
+theme_override_font_sizes/font_size = 17
+text = "ACERTO!"
+horizontal_alignment = 1

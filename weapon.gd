@@ -12,8 +12,13 @@ const HIP_FOV: float = 75.0
 const AIM_FOV: float = 55.0
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
-@onready var ammo_label: Label = get_tree().current_scene.get_node_or_null("HUD/AmmoLabel") as Label
-@onready var crosshair: Label = get_tree().current_scene.get_node_or_null("HUD/Crosshair") as Label
+@onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
+@onready var hud: CanvasLayer = get_tree().current_scene.get_node("HUD") as CanvasLayer
+@onready var ammo_label: Label = hud.get_node("AmmoLabel") as Label
+@onready var crosshair: Label = hud.get_node("Crosshair") as Label
+@onready var muzzle_flash: MeshInstance3D = $MuzzleFlash
+@onready var shot_audio: AudioStreamPlayer = $ShotAudio
+@onready var reload_audio: AudioStreamPlayer = $ReloadAudio
 
 var magazine: int = MAGAZINE_SIZE
 var reserve_ammo: int = STARTING_RESERVE
@@ -22,9 +27,15 @@ var reload_timer: float = 0.0
 var reloading: bool = false
 var pending_shot: bool = false
 var recoil: float = 0.0
+var recoil_pitch: float = 0.0
+var muzzle_timer: float = 0.0
+var walk_cycle: float = 0.0
 
 func _ready() -> void:
 	position = HIP_POSITION
+	muzzle_flash.visible = false
+	shot_audio.stream = _create_placeholder_sound(true)
+	reload_audio.stream = _create_placeholder_sound(false)
 	_update_hud()
 
 func request_fire() -> void:
@@ -35,6 +46,7 @@ func request_reload() -> void:
 		return
 	reloading = true
 	reload_timer = RELOAD_DURATION
+	reload_audio.play()
 	_update_hud()
 
 func _physics_process(delta: float) -> void:
@@ -56,24 +68,48 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	var aiming: bool = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	var moving: bool = player_body.is_on_floor() and Vector2(player_body.velocity.x, player_body.velocity.z).length_squared() > 0.8
+
+	if moving:
+		var running: bool = Input.is_key_pressed(KEY_SHIFT)
+		walk_cycle += delta * (12.0 if running else 8.0)
+
+	var bob_scale: float = 0.35 if aiming else 1.0
+	var bob_x: float = sin(walk_cycle) * 0.014 * bob_scale if moving else 0.0
+	var bob_y: float = abs(cos(walk_cycle)) * 0.010 * bob_scale if moving else 0.0
+
 	var target_pos: Vector3 = AIM_POSITION if aiming else HIP_POSITION
-	target_pos.z += recoil
+	target_pos += Vector3(bob_x, bob_y, recoil)
+	if reloading:
+		target_pos = HIP_POSITION + Vector3(0.08, -0.22, 0.04)
+
 	position = position.lerp(target_pos, minf(1.0, delta * 12.0))
+	rotation.x = lerpf(rotation.x, -0.32 if reloading else recoil_pitch, minf(1.0, delta * 13.0))
+	rotation.z = lerpf(rotation.z, sin(walk_cycle) * 0.018 if moving else 0.0, minf(1.0, delta * 8.0))
 	view_camera.fov = lerpf(view_camera.fov, AIM_FOV if aiming else HIP_FOV, minf(1.0, delta * 10.0))
-	recoil = move_toward(recoil, 0.0, delta * 0.5)
-	if crosshair != null:
-		crosshair.visible = not aiming
+	recoil = move_toward(recoil, 0.0, delta * 0.75)
+	recoil_pitch = move_toward(recoil_pitch, 0.0, delta * 2.2)
+
+	if muzzle_timer > 0.0:
+		muzzle_timer -= delta
+		if muzzle_timer <= 0.0:
+			muzzle_flash.visible = false
+
+	crosshair.visible = not aiming
 
 func _fire_hitscan() -> void:
 	magazine -= 1
 	shot_cooldown = SHOT_INTERVAL
-	recoil = 0.09
+	recoil = 0.10
+	recoil_pitch = 0.14
+	muzzle_timer = 0.07
+	muzzle_flash.visible = true
+	shot_audio.play()
 	_update_hud()
 
 	var origin: Vector3 = view_camera.global_position
 	var destination: Vector3 = origin - view_camera.global_transform.basis.z * MAX_RANGE
-	var query := PhysicsRayQueryParameters3D.create(origin, destination)
-	var player_body := view_camera.get_parent().get_parent() as CharacterBody3D
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, destination)
 	query.exclude = [player_body.get_rid()]
 
 	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
@@ -81,10 +117,36 @@ func _fire_hitscan() -> void:
 		var target: Object = hit.get("collider")
 		if target != null and target.has_method("take_damage"):
 			target.call("take_damage", 1)
+			hud.call("show_hit_marker")
 
 func _update_hud() -> void:
-	if ammo_label == null:
-		return
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]
 	if reloading:
 		ammo_label.text += "  RECARREGANDO..."
+
+# Efeito sonoro sintetizado apenas como placeholder; sem dependencia de arquivos/licencas.
+func _create_placeholder_sound(is_shot: bool) -> AudioStreamWAV:
+	var rate: int = 22050
+	var duration: float = 0.19 if is_shot else 0.09
+	var sample_count: int = int(float(rate) * duration)
+	var raw: PackedByteArray = PackedByteArray()
+	raw.resize(sample_count * 2)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 1944 if is_shot else 1945
+
+	for i in range(sample_count):
+		var progress: float = float(i) / float(sample_count)
+		var envelope: float = pow(1.0 - progress, 4.0 if is_shot else 5.0)
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		var tone: float = sin(float(i) * TAU * (110.0 if is_shot else 450.0) / float(rate))
+		var sample: float = clampf((noise * 0.80 + tone * 0.20) * envelope * 0.72, -1.0, 1.0)
+		var encoded: int = int(sample * 32767.0) & 0xffff
+		raw[i * 2] = encoded & 0xff
+		raw[i * 2 + 1] = (encoded >> 8) & 0xff
+
+	var stream: AudioStreamWAV = AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = raw
+	return stream

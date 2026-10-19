@@ -7,6 +7,7 @@ const MAX_RANGE: float = 90.0
 const SHOT_INTERVAL: float = 0.55
 const RELOAD_DURATION: float = 1.8
 const BOLT_CYCLE_DURATION: float = 0.44
+const BoltVisualRig = preload("res://weapon_bolt.gd")
 const CASE_EJECTION_DURATION: float = 0.38
 const HIP_POSITION: Vector3 = Vector3(0.30, -0.28, -0.56)
 const AIM_POSITION: Vector3 = Vector3(0.0, -0.15, -0.48)
@@ -41,8 +42,10 @@ var case_ejection_timer: float = 0.0
 var case_visual: MeshInstance3D
 var rifle_instance: Node3D
 var active_texture_size: int = 2
+var bolt_visual_rig: RefCounted
 
 func _ready() -> void:
+	bolt_visual_rig = BoltVisualRig.new()
 	position = HIP_POSITION
 	muzzle_flash.visible = false
 	# Quando o GLB estiver presente, troca somente o visual do rifle.
@@ -118,6 +121,8 @@ func _process(delta: float) -> void:
 
 	if case_visual != null:
 		_update_cartridge_case(delta)
+	if bolt_visual_rig != null and rifle_instance != null:
+		bolt_visual_rig.animate(cycle_progress if bolt_cycle_timer > 0.0 else 1.0)
 	crosshair.visible = not aiming
 
 func _fire_hitscan() -> void:
@@ -285,6 +290,8 @@ func _equip_real_rifle(texture_size: int = 2) -> bool:
 	# O arquivo distribuido ja esta normalizado para cerca de 1,11 m.
 	# Eixo da boca do cano: -Z, alinhado com a camera do FPS.
 	# Nao escalar novamente, pois o glTF original tinha escala de exportacao 100x.
+	if bolt_visual_rig != null:
+		bolt_visual_rig.reset()
 	replacement.name = "LeeEnfield3D"
 	add_child(replacement)
 	replacement.position = Vector3(0.0, 0.085, -0.55)
@@ -292,6 +299,8 @@ func _equip_real_rifle(texture_size: int = 2) -> bool:
 		rifle_instance.queue_free()
 	rifle_instance = replacement
 	active_texture_size = texture_size
+	if bolt_visual_rig != null:
+		bolt_visual_rig.bind_to(rifle_instance)
 
 	# Oculta somente malhas antigas. Audio e muzzle flash continuam ativos.
 	for child in get_children():

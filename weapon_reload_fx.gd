@@ -105,7 +105,7 @@ func _spawn_case_deferred(origin: Vector3, right: Vector3, back: Vector3, player
 		var old: RigidBody3D = spawned_cases.pop_front()
 		if is_instance_valid(old):
 			old.queue_free()
-	var cleanup_timer: SceneTreeTimer = get_tree().create_timer(8.0)
+	var cleanup_timer: SceneTreeTimer = get_tree().create_timer(8.0, false)
 	cleanup_timer.timeout.connect(func() -> void:
 		if is_instance_valid(shell):
 			shell.queue_free()

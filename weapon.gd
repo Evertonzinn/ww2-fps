@@ -35,6 +35,7 @@ func _ready() -> void:
 	position = HIP_POSITION
 	muzzle_flash.visible = false
 	_build_rifle_details()
+	_build_stock_mesh()
 	shot_audio.stream = _create_placeholder_sound(true)
 	reload_audio.stream = _create_placeholder_sound(false)
 	_update_hud()
@@ -178,3 +179,58 @@ func _weapon_box(node_name: String, local_position: Vector3, dimensions: Vector3
 	visual.material_override = surface
 	visual.position = local_position
 	add_child(visual)
+
+
+func _build_stock_mesh() -> void:
+	# Geometria tapered: a coronha deixa de ser um bloco uniforme.
+	# O node Stock original permanece na cena como fallback de editor.
+	$Stock.visible = false
+	var profiles: Array[Vector4] = [
+		Vector4(-0.39, 0.055, -0.060, 0.046),
+		Vector4(-0.23, 0.058, -0.075, 0.052),
+		Vector4(-0.08, 0.061, -0.079, 0.050),
+		Vector4(0.08, 0.073, -0.092, 0.060),
+		Vector4(0.29, 0.098, -0.110, 0.076),
+		Vector4(0.47, 0.104, -0.102, 0.089)
+	]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for profile_index in range(profiles.size() - 1):
+		var first: Vector4 = profiles[profile_index]
+		var second: Vector4 = profiles[profile_index + 1]
+		for face in range(4):
+			var next_corner: int = (face + 1) % 4
+			var a: Vector3 = _stock_corner(first, face)
+			var b: Vector3 = _stock_corner(first, next_corner)
+			var c: Vector3 = _stock_corner(second, next_corner)
+			var d: Vector3 = _stock_corner(second, face)
+			_stock_triangle(st, a, b, c)
+			_stock_triangle(st, a, c, d)
+	_stock_triangle(st, _stock_corner(profiles[0], 0), _stock_corner(profiles[0], 2), _stock_corner(profiles[0], 1))
+	_stock_triangle(st, _stock_corner(profiles[0], 0), _stock_corner(profiles[0], 3), _stock_corner(profiles[0], 2))
+	st.generate_normals()
+	var sculpted_stock := MeshInstance3D.new()
+	sculpted_stock.name = "SculptedStock"
+	sculpted_stock.mesh = st.commit()
+	var wood: StandardMaterial3D = StandardMaterial3D.new()
+	wood.albedo_color = Color(0.30, 0.18, 0.085)
+	wood.roughness = 0.88
+	wood.cull_mode = BaseMaterial3D.CULL_DISABLED
+	sculpted_stock.material_override = wood
+	add_child(sculpted_stock)
+
+func _stock_corner(profile: Vector4, corner: int) -> Vector3:
+	var half_width: float = profile.y
+	var center_y: float = profile.z
+	var half_height: float = profile.w
+	var x: float = -half_width if corner == 0 or corner == 3 else half_width
+	var y: float = center_y - half_height if corner == 0 or corner == 1 else center_y + half_height
+	return Vector3(x, y, profile.x)
+
+func _stock_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
+	surface.set_uv(Vector2(0, 0))
+	surface.add_vertex(a)
+	surface.set_uv(Vector2(1, 0))
+	surface.add_vertex(b)
+	surface.set_uv(Vector2(0.5, 1))
+	surface.add_vertex(c)

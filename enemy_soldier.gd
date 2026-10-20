@@ -12,7 +12,7 @@ const FOOT_LIFT: float = 0.046
 @export_range(1, 20, 1) var max_health: int = 3
 @export var high_quality: bool = false
 @onready var hitbox: CollisionShape3D = $CollisionShape3D
-@onready var locator: Label3D = $DebugMarker
+@onready var locator: Label3D = get_node_or_null("DebugMarker") as Label3D
 
 var health: int = 3
 var model: Node3D
@@ -20,6 +20,7 @@ var eliminated: bool = false
 var warning_layer: CanvasLayer
 
 func _ready() -> void:
+	_ensure_locator()
 	health = max_health
 	# A separate ZIP contains the 3D data; the GitHub PR has only code.
 	# Accept either 1K/2K variant, whichever has actually been extracted.
@@ -71,6 +72,21 @@ func _ready() -> void:
 	print("WW2 FPS enemy READY: visual meshes=%d bones=%d HP=%d model=%s position=%s" % [
 		meshes.size(), bone_count, health, chosen_path, str(global_position)
 	])
+
+func _ensure_locator() -> void:
+	# Scenes edited locally may not include the v0.10.1 diagnostic label.
+	# Never let an optional debugging node abort enemy model initialization.
+	if locator != null and is_instance_valid(locator):
+		return
+	locator = Label3D.new()
+	locator.name = "DebugMarker"
+	locator.position = Vector3(0.0, 2.17, 0.0)
+	locator.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	locator.pixel_size = 0.0038
+	locator.text = "SOLDADO TESTE"
+	locator.modulate = Color(1.0, 0.92, 0.44, 1.0)
+	add_child(locator)
+	push_warning("WW2 FPS enemy: DebugMarker was absent; created runtime locator.")
 
 func take_damage(amount: int) -> void:
 	if eliminated or amount <= 0:

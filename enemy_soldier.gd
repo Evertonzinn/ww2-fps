@@ -37,6 +37,9 @@ var initial_rotations: Dictionary = {}
 var last_visual_position: Vector3
 var walk_blend: float = 0.0
 var breath_phase: float = 0.0
+var combat_crouch_target: float = 0.0
+var combat_crouch_blend: float = 0.0
+var zone_original_y: Dictionary = {}
 
 func _ready() -> void:
 	health = max_health
@@ -50,6 +53,7 @@ func _ready() -> void:
 			var shape: CollisionShape3D = child.get_node_or_null("CollisionShape3D") as CollisionShape3D
 			if shape != null:
 				zones.append(shape)
+				zone_original_y[shape] = shape.position.y
 	_setup_labels()
 	var path: String = MODEL_2K if high_quality else MODEL_1K
 	if not ResourceLoader.exists(path):
@@ -169,7 +173,13 @@ func _process(delta: float) -> void:
 	walk_phase += displacement.length() * TAU / 1.15
 	walk_blend = move_toward(walk_blend, 1.0 if is_walking else 0.0, delta * 6.0)
 	breath_phase += delta * 1.8
-	model.position.y = FOOT_LIFT + absf(sin(walk_phase)) * 0.008 * walk_blend + sin(breath_phase) * 0.002
+	combat_crouch_blend = move_toward(combat_crouch_blend, combat_crouch_target, delta * 2.9)
+	model.position.y = FOOT_LIFT + absf(sin(walk_phase)) * 0.008 * walk_blend + sin(breath_phase) * 0.002 - combat_crouch_blend * 0.43
+	# Match damage regions to the lowered visual body when crouching.
+	for shape in zones:
+		if is_instance_valid(shape):
+			var initial_y: float = float(zone_original_y.get(shape, shape.position.y))
+			shape.position.y = initial_y - minf(combat_crouch_blend * 0.43, maxf(0.0, initial_y - 0.25))
 	_update_bone_pose()
 	if feedback_left > 0.0:
 		feedback_left = maxf(0.0, feedback_left - delta)
@@ -189,7 +199,10 @@ func _update_bone_pose() -> void:
 	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor)
 	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor)
 	_pose("LeftLeg", Vector3.RIGHT, -maxf(0.0, gait) * 0.55 * walk_factor)
-	_pose("RightLeg", Vector3.RIGHT, -maxf(0.0, -gait) * 0.55 * walk_factor)
+	_pose("RightLeg", Vector3.RIGHT, -maxf(0.0, -gait) * 0.55 * walk_factor + combat_crouch_blend * 0.72)
+	_pose("LeftLeg", Vector3.RIGHT, -maxf(0.0, gait) * 0.55 * walk_factor + combat_crouch_blend * 0.72)
+	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor - combat_crouch_blend * 0.62)
+	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor - combat_crouch_blend * 0.62)
 	# Arms are solved to the rifle grips in the combat child, after gait.
 	# Keep a neutral natural swing if the rifle has not been created.
 	if combat == null:
@@ -319,6 +332,8 @@ func receive_zone_damage(amount: int, region: String) -> void:
 	print("WW2 FPS enemy HIT: %s damage=%d HP=%d/%d" % [region, amount, health, max_health])
 	if health <= 0:
 		_die()
+	elif combat != null and combat.has_method("on_incoming_hit"):
+		combat.call("on_incoming_hit", region)
 
 func take_damage(amount: int) -> void:
 	# Backward-compatible generic damage if caller holds the enemy root.

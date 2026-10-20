@@ -192,6 +192,7 @@ func _fire() -> void:
 	recoil = 0.11
 	flash_timer = 0.06
 	shot_audio.play()
+	player_body.call("report_gunshot")
 	_start_bolt_cycle()
 	var origin: Vector3 = camera.global_position
 	var dest: Vector3 = origin - camera.global_transform.basis.z * MAX_RANGE

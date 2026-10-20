@@ -197,6 +197,7 @@ func _fire_hitscan() -> void:
 	recoil_pitch = 0.14
 	muzzle_timer = 0.07
 	shot_audio.play()
+	player_body.call("report_gunshot")
 
 	var auto_reload: bool = magazine == 0 and reserve_ammo > 0
 	if auto_reload and bolt_player != null and open_clip != &"":

@@ -1,5 +1,7 @@
 extends CharacterBody3D
 
+signal gunshot(location: Vector3)
+
 const WALK_SPEED: float = 5.0
 const RUN_SPEED: float = 8.0
 const JUMP_SPEED: float = 4.5
@@ -23,6 +25,10 @@ func _update_health_hud() -> void:
 	var ui: Node = get_tree().current_scene.get_node_or_null("HUD")
 	if ui != null:
 		ui.call("show_player_health", health, max_health)
+
+func report_gunshot() -> void:
+	if not is_dead:
+		gunshot.emit(global_position)
 
 func take_damage(amount: int) -> void:
 	if is_dead or amount <= 0:

@@ -1,5 +1,8 @@
 extends Node3D
 
+const CoverPlanner = preload("res://enemy_cover.gd")
+enum Tactic { PATROL, INVESTIGATE, ADVANCE, SEEK_COVER, IN_COVER }
+
 # WW2 FPS v0.12 — fair combat: finite sight, reaction time, miss chance,
 # obstruction-aware raycast, a torso-level visual gun and a tracer.
 const SIGHT_RANGE: float = 27.0
@@ -8,6 +11,8 @@ const KEEP_DISTANCE: float = 8.0
 const CHASE_SPEED: float = 2.1
 const BULLET_DAMAGE: int = 13
 const SIGHT_INTERVAL: float = 0.16
+const MAGAZINE_SIZE: int = 5
+const RELOAD_SECONDS: float = 2.7
 var soldier: AnimatableBody3D
 var player: CharacterBody3D
 var gun: Node3D
@@ -24,6 +29,19 @@ var left_grip: Marker3D
 var recoil_left: float = 0.0
 var gun_rest: Transform3D
 var mount_rest: Transform3D
+var tactic: Tactic = Tactic.PATROL
+var magazine: int = MAGAZINE_SIZE
+var reloading: bool = false
+var reload_left: float = 0.0
+var cover_point: Vector3 = Vector3.ZERO
+var cover_name: String = ""
+var cover_check_left: float = 2.5
+var cover_route_timeout: float = 0.0
+var cover_hold_left: float = 0.0
+var exposure_left: float = 0.0
+var peek_exposed: bool = false
+var peek_left: float = 0.0
+var leg_injured: bool = false
 
 func _ready() -> void:
 	# Gait/spine pose must finish before mounting the gun and solving the arms.
@@ -35,12 +53,18 @@ func _ready() -> void:
 		set_physics_process(false)
 		return
 	last_seen = soldier.global_position
+	magazine = MAGAZINE_SIZE
+	if player.has_signal("gunshot"):
+		player.connect("gunshot", Callable(self, "_on_player_gunshot"))
 	_create_gun()
 	_create_audio()
 	print("WW2 FPS enemy combat READY")
 
 func is_engaged() -> bool:
 	return alert
+
+func tactical_status() -> String:
+	return Tactic.keys()[tactic] + (" / RELOAD" if reloading else "")
 
 func _physics_process(delta: float) -> void:
 	if soldier == null or bool(soldier.get("eliminated")):
@@ -49,50 +73,103 @@ func _physics_process(delta: float) -> void:
 		return
 	if player == null or bool(player.get("is_dead")):
 		alert = false
+		tactic = Tactic.PATROL
+		soldier.set("combat_crouch_target", 0.0)
 		return
+
 	sight_time -= delta
 	if sight_time <= 0.0:
 		sight_time = SIGHT_INTERVAL
 		sees_player = _can_see_player()
 		if sees_player:
 			last_seen = player.global_position
-			lost_time = 4.0
+			lost_time = 6.0
 			if not alert:
-				alert = true
-				reaction_time = 0.85
-				shot_time = 0.85
-				print("WW2 FPS enemy ALERT")
+				_alert_at(last_seen, false)
 		elif alert:
-			lost_time -= SIGHT_INTERVAL
-			if lost_time <= 0.0:
+			lost_time = maxf(0.0, lost_time - SIGHT_INTERVAL)
+			if lost_time <= 0.0 and tactic != Tactic.IN_COVER:
 				alert = false
-				print("WW2 FPS enemy LOST player")
+				tactic = Tactic.PATROL
+				print("WW2 FPS enemy: resumed patrol")
+
 	if not alert:
+		soldier.set("combat_crouch_target", 0.0)
 		return
 
-	soldier.set("is_walking", false)
-	var destination: Vector3 = player.global_position if sees_player else last_seen
-	var vector: Vector3 = destination - soldier.global_position
-	vector.y = 0.0
-	var dist: float = vector.length()
-	if dist > 0.1:
-		var bearing: Vector3 = vector.normalized()
-		var target_yaw: float = atan2(-bearing.x, -bearing.z)
-		soldier.rotation.y = lerp_angle(soldier.rotation.y, target_yaw, minf(1.0, delta * 4.0))
-	if dist > KEEP_DISTANCE and float(soldier.get("flinch_left")) <= 0.0:
-		# Rotate first, then move in the direction the soldier faces:
-		# prevents sideways gliding and backwards marching.
-		var forward: Vector3 = -soldier.global_transform.basis.z
-		if forward.dot(vector.normalized()) > 0.80:
-			soldier.global_position = soldier.global_position.move_toward(
-				destination, minf(CHASE_SPEED * delta, dist - KEEP_DISTANCE))
-			soldier.set("is_walking", true)
+	# One finite magazine: no endless gunfire, no shot during reload.
+	if reloading:
+		reload_left = maxf(0.0, reload_left - delta)
+		soldier.set("combat_crouch_target", 1.0 if tactic == Tactic.IN_COVER else 0.0)
+		if reload_left <= 0.0:
+			reloading = false
+			magazine = MAGAZINE_SIZE
+			print("WW2 FPS enemy RELOADED: %d" % magazine)
+	elif magazine <= 0:
+		_begin_reload()
+
+	cover_check_left = maxf(0.0, cover_check_left - delta)
+	if tactic == Tactic.IN_COVER:
+		cover_hold_left -= delta
+		peek_left -= delta
+		if peek_left <= 0.0:
+			peek_exposed = not peek_exposed
+			peek_left = 0.95 if peek_exposed else 1.30
+		# Duck fully between bursts and while reloading.
+		soldier.set("combat_crouch_target", 0.0 if peek_exposed and not reloading else 1.0)
+		soldier.set("is_walking", false)
+		_face_towards(player.global_position, delta)
+		if cover_hold_left <= 0.0 or soldier.global_position.distance_to(player.global_position) < 4.0:
+			tactic = Tactic.ADVANCE
+			cover_check_left = 4.0
+	elif tactic == Tactic.SEEK_COVER:
+		soldier.set("combat_crouch_target", 0.0)
+		if soldier.global_position.distance_to(cover_point) <= 0.52:
+			tactic = Tactic.IN_COVER
+			cover_hold_left = 9.0
+			peek_exposed = false
+			peek_left = 1.2
+			print("WW2 FPS enemy COVER reached: ", cover_name)
+		else:
+			_move_towards(cover_point, delta, 0.48)
+			cover_route_timeout -= delta
+			if cover_route_timeout <= 0.0:
+				tactic = Tactic.ADVANCE
+				cover_check_left = 5.0
+				print("WW2 FPS enemy: unreachable cover abandoned")
+	else:
+		soldier.set("combat_crouch_target", 0.0)
+		# Move deliberately to sound/last seen location, not through walls.
+		var point: Vector3 = player.global_position if sees_player else last_seen
+		var stop_radius: float = KEEP_DISTANCE if sees_player else 0.65
+		if tactic == Tactic.INVESTIGATE and sees_player:
+			tactic = Tactic.ADVANCE
+		if tactic == Tactic.INVESTIGATE and soldier.global_position.distance_to(last_seen) < 0.7:
+			tactic = Tactic.ADVANCE
+		_move_towards(point, delta, stop_radius)
+
+	if sees_player and tactic == Tactic.ADVANCE:
+		exposure_left += delta
+	else:
+		exposure_left = maxf(0.0, exposure_left - delta * 0.6)
+	# Cover prioritizes wounded soldiers, low ammo and prolonged exposure.
+	var wounded: bool = int(soldier.get("health")) <= 65
+	if tactic == Tactic.ADVANCE and cover_check_left <= 0.0 and (
+			wounded or magazine <= 2 or exposure_left > 2.5):
+		cover_check_left = 5.0
+		_try_cover()
 
 	reaction_time = maxf(0.0, reaction_time - delta)
 	shot_time = maxf(0.0, shot_time - delta)
-	if sees_player and dist <= FIRE_RANGE and reaction_time <= 0.0 and shot_time <= 0.0:
-		_fire(dist)
-		shot_time = randf_range(1.45, 2.20)
+	if sees_player and not reloading and magazine > 0 and (
+			tactic != Tactic.IN_COVER or peek_exposed):
+		var range_to_player: float = soldier.global_position.distance_to(player.global_position)
+		if range_to_player <= FIRE_RANGE and reaction_time <= 0.0 and shot_time <= 0.0:
+			_fire(range_to_player)
+			magazine -= 1
+			shot_time = randf_range(1.35, 2.15)
+			if magazine <= 0:
+				_begin_reload()
 
 func _process(delta: float) -> void:
 	if gun == null or soldier == null or bool(soldier.get("eliminated")):
@@ -100,7 +177,9 @@ func _process(delta: float) -> void:
 	recoil_left = maxf(0.0, recoil_left - delta)
 	var mount: Transform3D = soldier.call("get_rifle_mount_transform")
 	gun.transform = mount * mount_rest.affine_inverse() * gun_rest
-	gun.transform = gun.transform * Transform3D(Basis(Vector3.RIGHT, 0.11 * (recoil_left / 0.16)), Vector3.ZERO)
+	var aim_lift: float = 0.22 if reloading else 0.0
+	gun.transform = gun.transform * Transform3D(
+		Basis(Vector3.RIGHT, 0.11 * (recoil_left / 0.16) + aim_lift), Vector3.ZERO)
 	if right_grip != null and left_grip != null:
 		soldier.call("pose_rifle_hands", right_grip.global_transform, left_grip.global_transform)
 
@@ -112,7 +191,8 @@ func _excluded() -> Array[RID]:
 	return rids
 
 func _can_see_player() -> bool:
-	var eye: Vector3 = soldier.global_position + Vector3.UP * 1.53
+	var crouch: float = float(soldier.get("combat_crouch_blend"))
+	var eye: Vector3 = soldier.global_position + Vector3.UP * (1.53 - 0.44 * crouch)
 	var target: Vector3 = player.global_position + Vector3.UP * 0.43
 	var toward: Vector3 = target - eye
 	if toward.length_squared() > SIGHT_RANGE * SIGHT_RANGE:
@@ -246,3 +326,96 @@ func _tracer(start: Vector3, target: Vector3) -> void:
 		if is_instance_valid(tracer):
 			tracer.queue_free()
 	)
+
+func _alert_at(location: Vector3, from_sound: bool) -> void:
+	alert = true
+	last_seen = location
+	lost_time = 7.0 if from_sound else 6.0
+	reaction_time = 0.90
+	shot_time = 0.90
+	tactic = Tactic.INVESTIGATE if from_sound else Tactic.ADVANCE
+	print("WW2 FPS enemy ", "HEARD SHOT" if from_sound else "ALERT")
+
+func _on_player_gunshot(location: Vector3) -> void:
+	if soldier == null or bool(soldier.get("eliminated")):
+		return
+	if soldier.global_position.distance_to(location) > 32.0:
+		return
+	if not alert:
+		_alert_at(location, true)
+	elif not sees_player:
+		last_seen = location
+		lost_time = 6.0
+		if tactic == Tactic.PATROL:
+			tactic = Tactic.INVESTIGATE
+
+func on_incoming_hit(region: String) -> void:
+	if soldier == null or bool(soldier.get("eliminated")):
+		return
+	if region == "Perna":
+		leg_injured = true
+	if player == null:
+		return
+	if not alert:
+		_alert_at(player.global_position, false)
+	cover_check_left = 0.0
+	exposure_left = 3.0
+
+func _begin_reload() -> void:
+	if reloading:
+		return
+	reloading = true
+	reload_left = RELOAD_SECONDS
+	shot_time = maxf(shot_time, RELOAD_SECONDS)
+	print("WW2 FPS enemy RELOADING")
+
+func _try_cover() -> void:
+	var world: Node3D = soldier.get_parent() as Node3D
+	if world == null:
+		return
+	var candidate: Dictionary = CoverPlanner.find_cover(world, soldier, player)
+	if candidate.is_empty():
+		return
+	cover_point = candidate["point"]
+	cover_name = String(candidate["obstacle"])
+	cover_route_timeout = 7.0
+	tactic = Tactic.SEEK_COVER
+	print("WW2 FPS enemy SEEK_COVER: ", cover_name, " at ", cover_point)
+
+func _face_towards(target: Vector3, delta: float) -> void:
+	var delta_position: Vector3 = target - soldier.global_position
+	delta_position.y = 0.0
+	if delta_position.length_squared() <= 0.005:
+		return
+	var direction: Vector3 = delta_position.normalized()
+	soldier.rotation.y = lerp_angle(soldier.rotation.y,
+		atan2(-direction.x, -direction.z), minf(1.0, delta * 4.0))
+
+func _move_towards(target: Vector3, delta: float, stop_radius: float) -> void:
+	var vector: Vector3 = target - soldier.global_position
+	vector.y = 0.0
+	var distance: float = vector.length()
+	soldier.set("is_walking", false)
+	if distance <= stop_radius:
+		_face_towards(player.global_position, delta)
+		return
+	_face_towards(target, delta)
+	var forward: Vector3 = -soldier.global_transform.basis.z
+	var direction: Vector3 = vector.normalized()
+	if forward.dot(direction) < 0.78:
+		return
+	# Prevent sliding through houses, crates and sandbag collision meshes.
+	# This remains local obstacle avoidance, not complete navigation.
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+		soldier.global_position + Vector3.UP * 0.70,
+		soldier.global_position + Vector3.UP * 0.70 + direction * 0.68)
+	query.exclude = _excluded()
+	var barrier: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	if not barrier.is_empty() and barrier.get("collider") != player:
+		return
+	var speed: float = CHASE_SPEED * (0.72 if leg_injured else 1.0)
+	var movement: float = minf(speed * delta, distance - stop_radius)
+	if movement > 0.0:
+		soldier.global_position += direction * movement
+		soldier.set("is_walking", true)
+

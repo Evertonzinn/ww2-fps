@@ -22,3 +22,6 @@
 /assets/weapons/lee_enfield/*.glb
 /assets/weapons/sniper/*.glb
 /assets/environment/remaster/models/*.glb
+
+# Art installed from licensed archives remains local; do not publish third-party meshes.
+/assets/remaster_imported/

@@ -24,8 +24,16 @@ func _run() -> void:
 		quit(1)
 		return
 	var body: Node3D = player.get_node_or_null("BodyVisual") as Node3D
-	if body == null or not bool(body.get("visual_loaded")):
-		push_error("v0.15 BODY SMOKE FAIL: rig or FPS mesh not imported correctly")
+	if body == null:
+		push_error("v0.15 BODY SMOKE FAIL: Player/BodyVisual node missing")
+		quit(1)
+		return
+	# Do not invoke bool() on a dynamically fetched property: this runtime
+	# reports "Invalid call. Nonexistent 'bool' constructor" for that case.
+	# Strict equality also distinguishes a missing/false readiness flag.
+	var loaded: Variant = body.get("visual_loaded")
+	if loaded != true:
+		push_error("v0.15 BODY SMOKE FAIL: British body not ready (visual_loaded=%s)" % str(loaded))
 		quit(1)
 		return
 	var rig: Skeleton3D = body.get("rig") as Skeleton3D

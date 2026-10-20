@@ -42,6 +42,49 @@ func _run() -> void:
 		quit(1)
 		return
 	print("PASS: rigged British body with %d bones" % rig.get_bone_count())
+	# Regression for v0.15.3: the complete torso/vest occupied the FPS
+	# viewport and hid both rifles. Only Pants and Boots may be visible.
+	var visual: Node3D = body.get_node_or_null("BritishSoldierFPS") as Node3D
+	if visual == null:
+		push_error("v0.15 BODY SMOKE FAIL: no BritishSoldierFPS instance")
+		quit(1)
+		return
+	var visible_pants: bool = false
+	var visible_boots: bool = false
+	for item in visual.find_children("*", "MeshInstance3D", true, false):
+		var piece: MeshInstance3D = item as MeshInstance3D
+		var part_name: String = str(piece.name).to_lower()
+		var expected_lower: bool = part_name.contains("pants") or part_name.contains("boots")
+		if piece.visible != expected_lower:
+			push_error("v0.15 BODY SMOKE FAIL: unsafe FPS mesh visibility: " + str(piece.name))
+			quit(1)
+			return
+		visible_pants = visible_pants or (piece.visible and part_name.contains("pants"))
+		visible_boots = visible_boots or (piece.visible and part_name.contains("boots"))
+	if not visible_pants or not visible_boots:
+		push_error("v0.15 BODY SMOKE FAIL: expected both trousers and boots")
+		quit(1)
+		return
+	var head: Node3D = player.get_node_or_null("Head") as Node3D
+	if head == null:
+		push_error("v0.15 BODY SMOKE FAIL: FPS camera head missing")
+		quit(1)
+		return
+	head.rotation.x = 0.0
+	body.call("_process", 0.016)
+	if visual.visible:
+		push_error("v0.15 BODY SMOKE FAIL: soldier still obstructs forward aim")
+		quit(1)
+		return
+	head.rotation.x = -1.0
+	body.call("_process", 0.016)
+	if not visual.visible:
+		push_error("v0.15 BODY SMOKE FAIL: trousers and boots hidden while looking down")
+		quit(1)
+		return
+	head.rotation.x = 0.0
+	body.call("_process", 0.016)
+	print("PASS: FPS viewport unobstructed; Pants/Boots visible only when looking down")
 	if player.get_node_or_null("StanceController") == null or player.get_node_or_null("Head/Camera3D/Weapon") == null:
 		push_error("v0.15 BODY SMOKE FAIL: previous stance or rifle contracts lost")
 		quit(1)

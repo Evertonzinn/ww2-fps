@@ -20,6 +20,11 @@ var previous_position: Vector3
 var walk_cycle: float = 0.0
 var walking_blend: float = 0.0
 var visual_loaded: bool = false
+# In first-person only lower-body garment meshes may be rendered.
+# Full CC_Base_Body and Vest occlude the camera even when head vertices
+# were removed during conversion. Never expose those meshes in FPS.
+var fps_lower_mesh_count: int = 0
+var fps_hidden_upper_mesh_count: int = 0
 
 func _ready() -> void:
 	player = get_parent() as CharacterBody3D
@@ -55,6 +60,31 @@ func _ready() -> void:
 			return
 		bones[name] = index
 		original_rotations[index] = rig.get_bone_pose_rotation(index)
+
+	# Character Creator vendor asset has distinct CC_Base_Body, Vest,
+	# Pants and Boots skinned meshes. The camera sits within the upper
+	# torso: hiding the head bone is NOT enough to prevent occlusion.
+	# Use a strict allowlist and fail closed if separate leg meshes are
+	# unavailable. Do not mutate the GLB or the third-person mesh.
+	var has_pants: bool = false
+	var has_boots: bool = false
+	for node in meshes:
+		var piece: MeshInstance3D = node as MeshInstance3D
+		if piece == null:
+			continue
+		var part_name: String = str(piece.name).to_lower()
+		var pants: bool = part_name.contains("pants")
+		var boots: bool = part_name.contains("boots")
+		piece.visible = pants or boots
+		if piece.visible:
+			fps_lower_mesh_count += 1
+			has_pants = has_pants or pants
+			has_boots = has_boots or boots
+		else:
+			fps_hidden_upper_mesh_count += 1
+	if not has_pants or not has_boots:
+		_fail("FPS body requires separate Pants and Boots meshes; hiding unsafe model")
+		return
 	if conceal_unbound_fps_arms:
 		# Stage 1: use the original player rifle viewmodels; do not draw
 		# detached T-pose arms while full rifle-grip IK is still pending.
@@ -63,8 +93,9 @@ func _ready() -> void:
 			if arm >= 0:
 				rig.set_bone_pose_scale(arm, Vector3.ZERO)
 	visual_loaded = true
-	print("WW2 British PlayerBody READY: %d meshes, %d bones" % [
-		meshes.size(), rig.get_bone_count()
+	print("WW2 British PlayerBody READY: %d meshes, %d bones; FPS legs=%d hidden_upper=%d" % [
+		meshes.size(), rig.get_bone_count(),
+		fps_lower_mesh_count, fps_hidden_upper_mesh_count
 	])
 
 func _fail(reason: String) -> void:
@@ -84,9 +115,13 @@ func _process(delta: float) -> void:
 		centre = 0.34
 	# Keep boots at the ground plane as Player's capsule changes height.
 	position.y = -centre
-	# Source FBX's TempMotion is a *single pose*, not a prone animation.
-	# Do not render a rigid upright soldier through the road in prone.
-	soldier.visible = stance != 2
+	# Never let the skinned body obstruct normal first-person targeting.
+	# Pants/boots appear only when deliberately looking down at the feet.
+	# Hide the preview on ADS and in prone (no authored prone clip yet).
+	var camera_head: Node3D = player.get_node_or_null("Head") as Node3D
+	var looking_down: bool = camera_head != null and camera_head.rotation.x <= -0.55
+	var ads_active: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	soldier.visible = stance != 2 and looking_down and not ads_active
 	var displacement: Vector3 = player.global_position - previous_position
 	displacement.y = 0.0
 	previous_position = player.global_position

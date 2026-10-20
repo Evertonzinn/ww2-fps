@@ -4,3 +4,8 @@
 
 # Godot editor cache
 .godot/
+
+# Privately sourced British infantry asset: keep local, never commit vendor FBX/GLBs.
+/assets/characters/player_british/*.glb
+/assets/characters/player_british/*.fbx
+/assets/characters/player_british/*.Fbx

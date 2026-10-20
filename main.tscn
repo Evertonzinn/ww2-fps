@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://world_props.gd" id="4_world"]
 [ext_resource type="Script" path="res://hud.gd" id="5_hud"]
 [ext_resource type="Script" path="res://graphics_menu.gd" id="6_graphics"]
+[ext_resource type="Script" path="res://player_body_visual.gd" id="7_body"]
 
 [sub_resource type="BoxMesh" id="GroundMesh"]
 size = Vector3(40, 1, 40)
@@ -97,6 +98,9 @@ shape = SubResource("PlayerShape")
 rotation = Vector3(1.5707963, 0, 0)
 disabled = true
 shape = SubResource("PronePlayerShape")
+
+[node name="BodyVisual" type="Node3D" parent="Player"]
+script = ExtResource("7_body")
 
 [node name="Head" type="Node3D" parent="Player"]
 position = Vector3(0, 0.6, 0)

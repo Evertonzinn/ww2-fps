@@ -196,13 +196,11 @@ func _update_bone_pose() -> void:
 	var gait: float = sin(walk_phase)
 	var walk_factor: float = walk_blend
 	var flinch: float = flinch_left / 0.35
-	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor)
-	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor)
-	_pose("LeftLeg", Vector3.RIGHT, -maxf(0.0, gait) * 0.55 * walk_factor)
-	_pose("RightLeg", Vector3.RIGHT, -maxf(0.0, -gait) * 0.55 * walk_factor + combat_crouch_blend * 0.72)
-	_pose("LeftLeg", Vector3.RIGHT, -maxf(0.0, gait) * 0.55 * walk_factor + combat_crouch_blend * 0.72)
+	# Blend tactical crouch into the same four walking joints.
 	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor - combat_crouch_blend * 0.62)
 	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor - combat_crouch_blend * 0.62)
+	_pose("LeftLeg", Vector3.RIGHT, -maxf(0.0, gait) * 0.55 * walk_factor + combat_crouch_blend * 0.72)
+	_pose("RightLeg", Vector3.RIGHT, -maxf(0.0, -gait) * 0.55 * walk_factor + combat_crouch_blend * 0.72)
 	# Arms are solved to the rifle grips in the combat child, after gait.
 	# Keep a neutral natural swing if the rifle has not been created.
 	if combat == null:

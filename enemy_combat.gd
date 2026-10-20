@@ -432,18 +432,41 @@ func _move_towards(target: Vector3, delta: float, stop_radius: float) -> void:
 	var direction: Vector3 = vector.normalized()
 	if forward.dot(direction) < 0.78:
 		return
-	# Prevent sliding through houses, crates and sandbag collision meshes.
-	# This remains local obstacle avoidance, not complete navigation.
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
-		soldier.global_position + Vector3.UP * 0.70,
-		soldier.global_position + Vector3.UP * 0.70 + direction * 0.68)
-	query.exclude = _excluded()
-	var barrier: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
-	if not barrier.is_empty() and barrier.get("collider") != player:
-		return
+	# Sweep the actual 1.8m enemy capsule instead of probing the path
+	# with a zero-width ray. A ray can miss wall edges that still clip
+	# the enemy's shoulders/legs. This is collision, not pathfinding.
 	var speed: float = CHASE_SPEED * (0.72 if leg_injured else 1.0)
 	var movement: float = minf(speed * delta, distance - stop_radius)
-	if movement > 0.0:
-		soldier.global_position += direction * movement
+	if movement <= 0.0:
+		return
+	var body_shape: CollisionShape3D = soldier.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if body_shape == null or body_shape.shape == null:
+		push_warning("Enemy movement blocked: original capsule collider missing")
+		return
+	var sweep: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+	sweep.shape = body_shape.shape
+	sweep.transform = body_shape.global_transform
+	sweep.motion = direction * movement
+	sweep.collision_mask = 1
+	sweep.collide_with_bodies = true
+	sweep.collide_with_areas = false
+	sweep.margin = 0.001
+	var ignored: Array[RID] = _excluded()
+	# Ground contact is expected, not an obstruction to horizontal travel.
+	var world: Node = get_tree().current_scene
+	if world != null:
+		var floor: CollisionObject3D = world.get_node_or_null("Ground") as CollisionObject3D
+		if floor != null:
+			ignored.append(floor.get_rid())
+	sweep.exclude = ignored
+	var allowed: PackedFloat32Array = get_world_3d().direct_space_state.cast_motion(sweep)
+	if allowed.size() < 2:
+		return
+	var safe_fraction: float = clampf(allowed[0], 0.0, 1.0)
+	# Keep a small skin-width backoff so repeated steps do not penetrate
+	# a wall due to floating point contact at the safe fraction.
+	var safe_distance: float = maxf(0.0, movement * safe_fraction - 0.006)
+	if safe_distance > 0.001:
+		soldier.global_position += direction * safe_distance
 		soldier.set("is_walking", true)
 

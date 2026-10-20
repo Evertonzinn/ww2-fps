@@ -20,6 +20,9 @@ const MODEL_DIRECTORY: String = "res://assets/weapons/lee_enfield/"
 const ReloadEffects = preload("res://weapon_reload_fx.gd")
 const SniperViewScript = preload("res://sniper_view.gd")
 const WeaponHandsScript = preload("res://weapon_hands.gd")
+const BallisticTrace = preload("res://combat/ballistic_trace.gd")
+const MUZZLE_VELOCITY_MPS: float = 744.0
+const BULLET_GRAVITY_MPS2: float = 9.81
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -222,10 +225,10 @@ func _fire_hitscan() -> void:
 	pending_ejection = true
 
 	var origin: Vector3 = view_camera.global_position
-	var destination: Vector3 = origin - view_camera.global_transform.basis.z * MAX_RANGE
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, destination)
-	query.exclude = [player_body.get_rid()]
-	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	var direction: Vector3 = -view_camera.global_transform.basis.z
+	var excluded: Array[RID] = [player_body.get_rid()]
+	var hit: Dictionary = BallisticTrace.trace(get_world_3d().direct_space_state,
+		origin, direction, MAX_RANGE, MUZZLE_VELOCITY_MPS, BULLET_GRAVITY_MPS2, excluded)
 	if not hit.is_empty():
 		var target: Object = hit.get("collider")
 		if target != null and target.has_method("take_damage"):

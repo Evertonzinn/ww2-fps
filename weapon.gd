@@ -320,10 +320,21 @@ func _equip_real_rifle(size: int) -> bool:
 		MODEL_DIRECTORY + "lee_enfield_%dk.glb" % size
 	]
 	var chosen: String = ""
+	var loaded_size: int = size
 	for path in sources:
 		if ResourceLoader.exists(path):
 			chosen = path
 			break
+	if chosen.is_empty():
+		var fallback_size: int = 1 if size == 2 else 2
+		for suffix in ["lee_enfield_charger_%dk.glb", "lee_enfield_rigged_once_%dk.glb",
+				"lee_enfield_rigged_%dk.glb", "lee_enfield_%dk.glb"]:
+			var candidate: String = MODEL_DIRECTORY + (suffix % fallback_size)
+			if ResourceLoader.exists(candidate):
+				chosen = candidate
+				loaded_size = fallback_size
+				push_warning("Lee-Enfield: preferred texture quality missing, using " + chosen)
+				break
 	if chosen.is_empty():
 		return false
 	var scene: PackedScene = ResourceLoader.load(chosen) as PackedScene
@@ -338,7 +349,7 @@ func _equip_real_rifle(size: int) -> bool:
 	if rifle_instance != null:
 		rifle_instance.queue_free()
 	rifle_instance = replacement
-	active_texture_size = size
+	active_texture_size = loaded_size
 	_bind_animations()
 	for child in get_children():
 		if child is MeshInstance3D and child != muzzle_flash:

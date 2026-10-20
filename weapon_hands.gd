@@ -120,18 +120,45 @@ func set_texture_quality(high: bool) -> bool:
 		Vector3(0.47, -0.51, -0.33))
 	left_ik = _make_ik("LeftArmSupportIK", left_chain, left_target,
 		Vector3(-0.46, -0.50, -0.43))
+	# A previous release called start() with invalid target_node paths,
+	# printed READY, and left both wrists >30cm from the rifle. Never
+	# start or expose the rig until BOTH IK paths resolve to the markers.
+	if right_ik == null or left_ik == null:
+		_disable_invalid_rig("an IK target NodePath does not resolve")
+		return false
+	if not _ik_paths_resolve():
+		_disable_invalid_rig("two-arm IK does not resolve both grip markers")
+		return false
 	current_right = _target_right()
 	current_left = _target_left()
 	right_target.position = _limited(current_right, right_chain)
 	left_target.position = _limited(current_left, left_chain)
 	right_ik.start()
 	left_ik.start()
+	if not right_ik.is_running() or not left_ik.is_running():
+		_disable_invalid_rig("IK solver failed to start")
+		return false
 	active_quality = chosen
 	hands_initialized = true
 	print("WW2 FPS HANDS READY: %d bones, %d skinned meshes, quality=%dk, dual IK" % [
 		skeleton.get_bone_count(), meshes.size(), active_quality
 	])
 	return true
+
+func _ik_paths_resolve() -> bool:
+	return right_ik != null and left_ik != null and (
+		right_ik.get_parent_skeleton() == skeleton and
+		left_ik.get_parent_skeleton() == skeleton and
+		right_ik.get_node_or_null(right_ik.target_node) == right_target and
+		left_ik.get_node_or_null(left_ik.target_node) == left_target)
+
+func _disable_invalid_rig(reason: String) -> void:
+	# Fail closed: the rifles are playable, but invalid IK must never
+	# place detached forearms over the screen.
+	push_warning("WW2 FPS HANDS DISABLED: " + reason)
+	_shutdown_ik()
+	if model_root != null and is_instance_valid(model_root):
+		model_root.visible = false
 
 func _shutdown_ik() -> void:
 	if right_ik != null and is_instance_valid(right_ik):
@@ -170,7 +197,15 @@ func _make_ik(label: String, chain: Array[int], marker: Marker3D,
 	ik.max_iterations = 24
 	ik.min_distance = 0.003
 	skeleton.add_child(ik)
-	ik.target_node = skeleton.get_path_to(marker)
+	# target_node belongs to SkeletonIK3D, NOT to its Skeleton3D parent.
+	# Calculating skeleton.get_path_to(marker) made NodePaths one "../"
+	# short: Godot reported ".../RightHandOnGrip" not found from the IK.
+	ik.target_node = ik.get_path_to(marker)
+	if ik.get_node_or_null(ik.target_node) != marker:
+		push_warning("FPS hands IK: failed to resolve " + str(ik.target_node) +
+			" from " + str(ik.get_path()))
+		ik.queue_free()
+		return null
 	ik.use_magnet = true
 	ik.magnet = skeleton.to_local(to_global(pole))
 	return ik

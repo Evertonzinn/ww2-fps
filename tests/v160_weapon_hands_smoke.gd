@@ -34,10 +34,27 @@ func _run() -> void:
 	if hands.right_ik == null or hands.left_ik == null:
 		_fail("two arm IK chains were not created")
 		return
-	print("PASS: rigged skinned hands (bones=%d) and two arm IK targets" % hands.skeleton.get_bone_count())
+	# Target path MUST resolve from the SkeletonIK3D node itself.
+	# Godot 4.7.2 previously logged "Node not found" while code still
+	# announced HANDS READY, so verify actual node identity here.
+	var right_resolved: Node = hands.right_ik.get_node_or_null(hands.right_ik.target_node)
+	var left_resolved: Node = hands.left_ik.get_node_or_null(hands.left_ik.target_node)
+	if right_resolved != hands.right_target or left_resolved != hands.left_target:
+		_fail("IK target paths invalid: right=%s left=%s" % [
+			str(hands.right_ik.target_node), str(hands.left_ik.target_node)
+		])
+		return
+	if hands.right_ik.get_parent_skeleton() != hands.skeleton or hands.left_ik.get_parent_skeleton() != hands.skeleton:
+		_fail("IK node is not attached to imported Skeleton3D")
+		return
+	if not hands.right_ik.is_running() or not hands.left_ik.is_running():
+		_fail("IK was created but is not running")
+		return
+	print("PASS: two IK targets resolve from their OWN nodes and solvers are running")
+	print("PASS: rigged skinned hands (bones=%d)" % hands.skeleton.get_bone_count())
 	# Merely constructing IK targets was a false-positive risk in older
 	# prototypes. The actual wrist joints must converge to rifle targets.
-	for frame in range(4):
+	for frame in range(8):
 		await process_frame
 	var lee_right_error: float = _wrist_error(hands, hands.right_chain,
 		hands.right_target.position)
@@ -46,6 +63,14 @@ func _run() -> void:
 	print("WW2 FPS HANDS GRIP: Lee right=%.3fm left=%.3fm" % [
 		lee_right_error, lee_left_error
 	])
+	var lee_right_clamp: float = hands.right_target.position.distance_to(hands._target_right())
+	var lee_left_clamp: float = hands.left_target.position.distance_to(hands._target_left())
+	print("WW2 FPS HANDS GRIP CLAMP: Lee right=%.3fm left=%.3fm" % [
+		lee_right_clamp, lee_left_clamp
+	])
+	if lee_right_clamp > 0.12 or lee_left_clamp > 0.12:
+		_fail("IK targets are clamped too far from actual rifle grips")
+		return
 	if not is_finite(lee_right_error) or not is_finite(lee_left_error):
 		_fail("Lee grip IK produced non-finite wrist positions")
 		return
@@ -75,7 +100,7 @@ func _run() -> void:
 	if not hands.current_right.is_finite() or not hands.current_left.is_finite():
 		_fail("sniper hand pose is non-finite")
 		return
-	for frame in range(4):
+	for frame in range(8):
 		await process_frame
 	var sniper_right_error: float = _wrist_error(hands, hands.right_chain,
 		hands.right_target.position)

@@ -16,3 +16,9 @@
 # Poly Haven CC0 1K material downloads installed locally by tool.
 /assets/environment/remaster/textures/*.jpg
 /assets/environment/remaster/textures/*.png
+
+# Large third-party character and weapon binaries remain local. Confirm licenses before distribution.
+/assets/characters/panzergrenadier/*.glb
+/assets/weapons/lee_enfield/*.glb
+/assets/weapons/sniper/*.glb
+/assets/environment/remaster/models/*.glb

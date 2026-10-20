@@ -2,11 +2,11 @@ extends RefCounted
 
 # Tactical cover placement using actual scene collision objects. No NavMesh.
 # Returns empty Dictionary when no cover satisfies the line-of-sight test.
-const COVER_NAMES: PackedStringArray = PackedStringArray([
+const COVER_NAMES = [
 	"SandbagLeft", "SandbagRight",
 	"SupplyCrateA", "SupplyCrateB",
 	"BarrelLeft", "BarrelRight"
-])
+]
 const MAX_TRAVEL: float = 13.0
 
 static func find_cover(world: Node3D, enemy: CollisionObject3D,
@@ -24,7 +24,9 @@ static func find_cover(world: Node3D, enemy: CollisionObject3D,
 		if obstacle == null:
 			continue
 		var collider: CollisionShape3D = obstacle.get_node_or_null("CollisionShape3D") as CollisionShape3D
-		if collider == null or not collider.shape is BoxShape3D:
+		if collider == null:
+			continue
+		if not (collider.shape is BoxShape3D):
 			continue
 		var half: Vector3 = (collider.shape as BoxShape3D).size * 0.5
 		var away: Vector3 = obstacle.global_position - player.global_position

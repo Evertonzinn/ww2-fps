@@ -161,7 +161,7 @@ func _physics_process(delta: float) -> void:
 
 	reaction_time = maxf(0.0, reaction_time - delta)
 	shot_time = maxf(0.0, shot_time - delta)
-	if sees_player and not reloading and magazine > 0 and (
+	if sees_player and not reloading and magazine > 0 and tactic != Tactic.SEEK_COVER and (
 			tactic != Tactic.IN_COVER or peek_exposed):
 		var range_to_player: float = soldier.global_position.distance_to(player.global_position)
 		if range_to_player <= FIRE_RANGE and reaction_time <= 0.0 and shot_time <= 0.0:

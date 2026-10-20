@@ -125,7 +125,7 @@ func _process(delta: float) -> void:
 		return
 	flinch_left = maxf(0.0, flinch_left - delta)
 	walk_phase += delta * (8.0 if is_walking else 1.8)
-	model.position.y = FOOT_LIFT + (absf(sinf(walk_phase)) * 0.012 if is_walking else sinf(walk_phase) * 0.003)
+	model.position.y = FOOT_LIFT + (absf(sin(walk_phase)) * 0.012 if is_walking else sin(walk_phase) * 0.003)
 	_update_bone_pose()
 	if feedback_left > 0.0:
 		feedback_left = maxf(0.0, feedback_left - delta)
@@ -139,7 +139,7 @@ func _process(delta: float) -> void:
 func _update_bone_pose() -> void:
 	if rig == null:
 		return
-	var gait: float = sinf(walk_phase)
+	var gait: float = sin(walk_phase)
 	var walk_factor: float = 1.0 if is_walking else 0.0
 	var flinch: float = flinch_left / 0.35
 	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor)
@@ -148,10 +148,10 @@ func _update_bone_pose() -> void:
 	_pose("RightLeg", Vector3.RIGHT, maxf(0.0, gait) * 0.24 * walk_factor)
 	_pose("LeftArm", Vector3.RIGHT, -gait * 0.20 * walk_factor)
 	_pose("RightArm", Vector3.RIGHT, gait * 0.20 * walk_factor)
-	_pose("Spine", Vector3.RIGHT, sinf(walk_phase * 0.6) * 0.015 - flinch * 0.13)
-	_pose("Spine1", Vector3.FORWARD, sinf(walk_phase * 0.5) * 0.01)
+	_pose("Spine", Vector3.RIGHT, sin(walk_phase * 0.6) * 0.015 - flinch * 0.13)
+	_pose("Spine1", Vector3.FORWARD, sin(walk_phase * 0.5) * 0.01)
 	_pose("Spine2", Vector3.RIGHT, -flinch * 0.06)
-	_pose("Head", Vector3.UP, sinf(walk_phase * 0.4) * 0.025)
+	_pose("Head", Vector3.UP, sin(walk_phase * 0.4) * 0.025)
 
 func _pose(name: String, axis: Vector3, angle: float) -> void:
 	if not bones.has(name):

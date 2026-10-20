@@ -35,6 +35,26 @@ func _run() -> void:
 		_fail("two arm IK chains were not created")
 		return
 	print("PASS: rigged skinned hands (bones=%d) and two arm IK targets" % hands.skeleton.get_bone_count())
+	# Merely constructing IK targets was a false-positive risk in older
+	# prototypes. The actual wrist joints must converge to rifle targets.
+	for frame in range(4):
+		await process_frame
+	var lee_right_error: float = _wrist_error(hands, hands.right_chain,
+		hands.right_target.position)
+	var lee_left_error: float = _wrist_error(hands, hands.left_chain,
+		hands.left_target.position)
+	print("WW2 FPS HANDS GRIP: Lee right=%.3fm left=%.3fm" % [
+		lee_right_error, lee_left_error
+	])
+	if not is_finite(lee_right_error) or not is_finite(lee_left_error):
+		_fail("Lee grip IK produced non-finite wrist positions")
+		return
+	if lee_right_error > 0.18 or lee_left_error > 0.18:
+		_fail("Lee wrists did not reach weapon grips (right=%.3fm left=%.3fm)" % [
+			lee_right_error, lee_left_error
+		])
+		return
+	print("PASS: both skinned hands converge onto Lee-Enfield grips")
 	if hands.right_target.position.distance_to(hands.left_target.position) < 0.10:
 		_fail("both hands collapsed into same target")
 		return
@@ -55,7 +75,24 @@ func _run() -> void:
 	if not hands.current_right.is_finite() or not hands.current_left.is_finite():
 		_fail("sniper hand pose is non-finite")
 		return
-	print("PASS: sniper selection retains independently posed hand grip/support")
+	for frame in range(4):
+		await process_frame
+	var sniper_right_error: float = _wrist_error(hands, hands.right_chain,
+		hands.right_target.position)
+	var sniper_left_error: float = _wrist_error(hands, hands.left_chain,
+		hands.left_target.position)
+	print("WW2 FPS HANDS GRIP: sniper right=%.3fm left=%.3fm" % [
+		sniper_right_error, sniper_left_error
+	])
+	if not is_finite(sniper_right_error) or not is_finite(sniper_left_error):
+		_fail("sniper IK produced non-finite wrist positions")
+		return
+	if sniper_right_error > 0.18 or sniper_left_error > 0.18:
+		_fail("sniper wrists did not reach weapon grips (right=%.3fm left=%.3fm)" % [
+			sniper_right_error, sniper_left_error
+		])
+		return
+	print("PASS: sniper selection retains two real wrist grip poses")
 	rifle.select_weapon(1)
 	hands._process(0.2)
 	if rifle.sniper_equipped or rifle.magazine != lee_ammo:
@@ -72,3 +109,11 @@ func _run() -> void:
 func _fail(reason: String) -> void:
 	push_error("WW2 FPS v0.16 RIGGED HANDS SMOKE: FAIL — " + reason)
 	quit(1)
+
+func _wrist_error(hands: FirstPersonWeaponHands, chain: Array[int],
+		target: Vector3) -> float:
+	if chain.size() != 3 or hands.skeleton == null:
+		return INF
+	var wrist_local: Vector3 = hands.to_local(hands.skeleton.to_global(
+		hands.skeleton.get_bone_global_pose(chain[2]).origin))
+	return wrist_local.distance_to(target)

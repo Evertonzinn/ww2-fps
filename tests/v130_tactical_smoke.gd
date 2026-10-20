@@ -46,14 +46,51 @@ func _run() -> void:
 		quit(1)
 		return
 	print("PASS: magazine exhaustion locks fire during reload")
-	soldier.set("combat_crouch_target", 1.0)
-	for i in range(15):
-		await process_frame
-	if float(soldier.get("combat_crouch_blend")) <= 0.0:
-		push_error("v0.13 TACTICAL SMOKE: crouch animation blend did not update")
+	# The AI, not the test, owns combat_crouch_target. In INVESTIGATE it
+	# correctly resets the requested crouch to 0 every physics tick.
+	# Drive the real IN_COVER state with deterministic delta, independent
+	# of headless process_frame timing (which may be faster than physics).
+	combat.set_process(false)
+	combat.set_physics_process(false)
+	soldier.set_process(false)
+	soldier.set_physics_process(false)
+	var head_shape: CollisionShape3D = soldier.get_node_or_null(
+		"HeadHitbox/CollisionShape3D") as CollisionShape3D
+	if head_shape == null:
+		push_error("v0.13 TACTICAL SMOKE: head hitbox missing")
 		quit(1)
 		return
-	print("PASS: procedural crouch and original skeleton respond")
+	var standing_head_y: float = head_shape.position.y
+	combat.set("tactic", 4) # Tactic.IN_COVER
+	combat.set("cover_hold_left", 10.0)
+	combat.set("peek_left", 3.0)
+	combat.set("peek_exposed", false)
+	# Reload remains active from the preceding test.
+	combat.call("_physics_process", 1.0 / 60.0)
+	if float(soldier.get("combat_crouch_target")) < 0.9:
+		push_error("v0.13 TACTICAL SMOKE: covered soldier did not request crouch")
+		quit(1)
+		return
+	soldier.call("_process", 0.25)
+	var crouch_blend: float = float(soldier.get("combat_crouch_blend"))
+	if crouch_blend <= 0.1 or head_shape.position.y >= standing_head_y - 0.05:
+		push_error("v0.13 TACTICAL SMOKE: covered crouch/hitboxes did not lower")
+		quit(1)
+		return
+	print("PASS: cover + reload crouch lowers rig and head hitbox (blend=%.2f)" % crouch_blend)
+	# An exposed, reloaded soldier must restore the standing pose and hitboxes.
+	combat.set("reloading", false)
+	combat.set("magazine", 5)
+	combat.set("peek_exposed", true)
+	combat.call("_physics_process", 1.0 / 60.0)
+	soldier.call("_process", 0.25)
+	if float(soldier.get("combat_crouch_target")) > 0.1 \
+			or float(soldier.get("combat_crouch_blend")) > 0.1 \
+			or absf(head_shape.position.y - standing_head_y) > 0.05:
+		push_error("v0.13 TACTICAL SMOKE: exposed soldier did not stand up")
+		quit(1)
+		return
+	print("PASS: exposure restores standing pose and original hitboxes")
 	var cover_script: Script = load("res://enemy_cover.gd") as Script
 	var candidate: Dictionary = cover_script.find_cover(world, soldier, player)
 	print("INFO: verified physical cover candidate=", candidate)

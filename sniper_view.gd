@@ -100,8 +100,10 @@ func set_texture_quality(high: bool) -> bool:
 	if new_rifle == null:
 		return false
 	new_rifle.name = "MartinTrafasSniper"
-	# Source muzzle points -Y, scope +Z. Reorient to Godot forward -Z, up +Y.
-	new_rifle.basis = Basis.IDENTITY
+	# Sketchfab root already maps +Y to forward -Z; the barrel points -Y.
+	# Rotate only this visual GLB 180 degrees around world-up so the muzzle faces -Z.
+	# Do not rotate camera, SniperView, scope or raycast.
+	new_rifle.basis = Basis(Vector3.UP, PI)
 	new_rifle.position = Vector3(0.0, 0.025, -0.30)
 	add_child(new_rifle)
 	if rifle != null and is_instance_valid(rifle):

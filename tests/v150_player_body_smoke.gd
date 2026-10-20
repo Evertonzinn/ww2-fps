@@ -64,10 +64,28 @@ func _run() -> void:
 		push_error("v0.15 BODY SMOKE FAIL: imported rig/mesh scale was not applied")
 		quit(1)
 		return
-	if soldier_root.position.z > -0.15:
-		push_error("v0.15 BODY SMOKE FAIL: legs not placed ahead of player view")
+	if body.get("anatomical_anchors_valid") != true:
+		push_error("v0.15 BODY SMOKE FAIL: hip and boot rest-bone anchors missing")
 		quit(1)
 		return
+	var hip_local: Vector3 = body.get("fps_hip_local")
+	var foot_local: Vector3 = body.get("fps_foot_local")
+	var hip_world: Vector3 = soldier_root.to_global(hip_local)
+	var boot_world: Vector3 = soldier_root.to_global(foot_local)
+	var hip_in_player: Vector3 = player.to_local(hip_world)
+	var boot_in_player: Vector3 = player.to_local(boot_world)
+	var expected_offset: float = float(body.get("eye_ahead_of_hips"))
+	if absf(hip_in_player.z - expected_offset) > 0.03:
+		push_error("v0.15 BODY SMOKE FAIL: hips are not behind eyes: actual z=%.3f target=%.3f" % [
+			hip_in_player.z, expected_offset
+		])
+		quit(1)
+		return
+	if hip_in_player.y < boot_in_player.y + 0.70:
+		push_error("v0.15 BODY SMOKE FAIL: hip/boot anatomy has invalid vertical ordering")
+		quit(1)
+		return
+	print("PASS: hips %.2fm behind first-person eyes; feet anchored below" % hip_in_player.z)
 	print("PASS: British body normalized; source=%s raw=%.4fm scale=%.4f" % [
 		source_kind, raw_height, scale_factor
 	])
@@ -107,12 +125,33 @@ func _run() -> void:
 		push_error("v0.15 BODY SMOKE FAIL: skinned legs vanish in normal stance")
 		quit(1)
 		return
-	head.rotation.x = -1.0
+	head.rotation.x = -1.30
 	body.call("_process", 0.016)
 	if not visual.visible:
 		push_error("v0.15 BODY SMOKE FAIL: skinned legs vanish when looking down")
 		quit(1)
 		return
+	# A valid mesh visibility flag never guaranteed correct FPS framing.
+	# Project actual thigh and ankle rest points into the game camera.
+	var camera: Camera3D = player.get_node_or_null("Head/Camera3D") as Camera3D
+	if camera == null:
+		push_error("v0.15 BODY SMOKE FAIL: camera missing")
+		quit(1)
+		return
+	if camera.is_position_behind(hip_world) or camera.is_position_behind(boot_world):
+		push_error("v0.15 BODY SMOKE FAIL: legs are behind the downward-facing camera")
+		quit(1)
+		return
+	var projected_hip: Vector2 = camera.unproject_position(hip_world)
+	var projected_boot: Vector2 = camera.unproject_position(boot_world)
+	print("WW2 British PlayerBody SCREEN: hip=%s boot=%s" % [
+		str(projected_hip), str(projected_boot)
+	])
+	if projected_hip.y <= projected_boot.y:
+		push_error("v0.15 BODY SMOKE FAIL: first-person anatomy inverted in screen projection")
+		quit(1)
+		return
+	print("PASS: hips project lower on screen than boots when looking down")
 	var visible_in_tree: int = 0
 	for node in visual.find_children("*", "MeshInstance3D", true, false):
 		var piece: MeshInstance3D = node as MeshInstance3D

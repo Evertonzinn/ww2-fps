@@ -10,9 +10,9 @@ const REQUIRED = [
 @export_range(-180.0, 180.0, 1.0) var body_yaw_degrees: float = 0.0
 @export var conceal_unbound_fps_arms: bool = true
 @export var preview_walk_legs: bool = true
-# Cosmetic offset of skinned trousers toward the player's forward view.
-# No effect on collision, muzzle, bullet trace or player position.
-@export_range(0.15, 0.80, 0.01) var leg_preview_forward: float = 0.46
+# FPS anatomy: the hip is behind the eyes in +Z; -Z is forward in Godot.
+# The previous 0.46m -Z shift projected the waistband ABOVE the boots.
+@export_range(0.06, 0.28, 0.01) var eye_ahead_of_hips: float = 0.14
 
 var player: CharacterBody3D
 var soldier: Node3D
@@ -36,6 +36,9 @@ var raw_rig_leg_height: float = 0.0
 var imported_visual_scale: float = 1.0
 var corrected_visual_height: float = 0.0
 var visual_bounds_source: String = "none"
+var fps_hip_local: Vector3 = Vector3.ZERO
+var fps_foot_local: Vector3 = Vector3.ZERO
+var anatomical_anchors_valid: bool = false
 
 func _ready() -> void:
 	player = get_parent() as CharacterBody3D
@@ -157,11 +160,17 @@ func _ready() -> void:
 				rig.get_bone_global_rest(right_thigh_index).origin))
 			floor_y = minf(foot_local.y, right_foot.y) - raw_rig_leg_height * 0.08
 			mid_x = (thigh_local.x + right_thigh.x) * 0.5
-			mid_z = (foot_local.z + right_foot.z) * 0.5
+			# Centre the player's hips below/behind the camera.
+			mid_z = (thigh_local.z + right_thigh.z) * 0.5
+			fps_hip_local = (thigh_local + right_thigh) * 0.5
+			fps_foot_local = (foot_local + right_foot) * 0.5
 		else:
 			floor_y = foot_local.y - raw_rig_leg_height * 0.08
 			mid_x = thigh_local.x
-			mid_z = foot_local.z
+			mid_z = thigh_local.z
+			fps_hip_local = thigh_local
+			fps_foot_local = foot_local
+		anatomical_anchors_valid = true
 
 	imported_visual_scale = target_span / reference_span
 	corrected_visual_height = reference_span * imported_visual_scale
@@ -173,14 +182,22 @@ func _ready() -> void:
 	# Scale the imported rig and its skinned meshes TOGETHER. This is
 	# outside the Player collider and does not alter physics or gun FOV.
 	soldier.scale = Vector3.ONE * imported_visual_scale
+	# Keep the hip 14cm behind the horizontal eye plane, not 46cm
+	# in front; boots and knees are then seen from above in FPS.
 	soldier.position = Vector3(-mid_x * imported_visual_scale,
 		-floor_y * imported_visual_scale,
-		-leg_preview_forward - mid_z * imported_visual_scale)
+		eye_ahead_of_hips - mid_z * imported_visual_scale)
 	measured_lower_body = true
 	print("WW2 British PlayerBody BOUNDS: mesh=%.4fm rig=%.4fm source=%s scale=%.4f normalized=%.3fm offset=%s" % [
 		garment_height, raw_rig_leg_height, visual_bounds_source,
 		imported_visual_scale, corrected_visual_height, str(soldier.position)
 	])
+	if anatomical_anchors_valid:
+		var hip_in_player: Vector3 = player.to_local(soldier.to_global(fps_hip_local))
+		var boot_in_player: Vector3 = player.to_local(soldier.to_global(fps_foot_local))
+		print("WW2 British PlayerBody ANATOMY: hip=%s boot=%s" % [
+			str(hip_in_player), str(boot_in_player)
+		])
 	if conceal_unbound_fps_arms:
 		# Stage 1: use the original player rifle viewmodels; do not draw
 		# detached T-pose arms while full rifle-grip IK is still pending.

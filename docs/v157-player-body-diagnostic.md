@@ -1,7 +1,23 @@
 # v0.15.7 — diagnóstico de skinning e enquadramento FPS
 
-**Estado: instrumentação entregue; correção visual bloqueada por falta dos GLBs
-reais e do Godot. Não aprovar este PR como resolução da invisibilidade.**
+**Atualização após execução no Debian:** o usuário executou o smoke e retornou
+falhas de orientação pé->dedos nos dois lados. Foi adicionada uma correção de
+runtime em `player_body_visual.gd`: `_align_feet_forward()` mede essa direção
+nos bones reais em repouso, resolve o yaw para -Z e gira o root visual inteiro.
+O posicionamento passa a transformar a âncora pela base final rotacionada,
+preservando a posição do quadril/piso após o giro. Não muda escala, câmera,
+armas, controles ou arquivos GLB.
+
+Não se presume que a falha signifique exatamente 180 graus: o ângulo é calculado
+em runtime e impresso em `FORWARD`. Direções degeneradas/contraditórias falham
+explicitamente. O export `body_yaw_degrees` passa a ser um ajuste adicional à
+calibração (valor padrão 0). O teste de orientação permanece exigente.
+
+Verificação matemática executada: cinco direções de origem convergem para -Z;
+âncora preservada com três rotações e escala uniforme. Não equivale a execução
+Godot. **Correção de orientação implementada; aceite visual pendente no Debian.**
+Abaixo está o diagnóstico inicial e seu histórico; a causa de toda a
+invisibilidade ainda não foi comprovada.
 
 Base consultada antes da edição: `fix/v156-player-body-anatomical-framing`,
 HEAD `43f91807dfb7d6ee62048ab02af369f7848920ca` (igual à referência).
@@ -45,8 +61,10 @@ relatado não basta para atribuir o defeito ao Blender ou ao driver Nouveau.
    independentes, salva JSON e oferece inspeção gráfica isolada.
 3. Este documento.
 
-Nenhum script de gameplay, cena principal, asset ou configuração global mudou.
-Nenhuma dependência foi instalada. O patch não aplica outro offset especulativo.
+Na entrega diagnóstica inicial nenhum runtime mudou. A atualização modifica
+somente player_body_visual.gd para a orientação descrita acima, além deste
+relatório. Cena principal, assets, configurações e controles continuam intactos.
+Nenhuma dependência instalada; o offset anatômico não foi aumentado.
 
 O JSON registra SHA-256 do GLB, configuração `.import`, hierarquia/transforms,
 rest pose e pose atual dos bones, binds, arrays/pesos válidos, material/culling,
@@ -124,8 +142,9 @@ Depois testar gameplay normal, sem `--script`:
 
 Verificar pernas/botas olhando para baixo, caminhada/corrida, agachamento,
 prone oculto, ADS das duas armas, recarga, C/Ctrl/Espaço e teto baixo.
-Nesta entrega o visual permanece o da v156: a instrumentação coleta evidências
-para escolher a correção, não promete mudar o que aparece no jogo.
+Com a atualização, o runtime alinha a frente do modelo e mantém a âncora após
+o giro. Confirmar se botas/pernas aparecem naturalmente; o restante do
+diagnóstico continua necessário caso persista invisibilidade.
 
 ## Resultados e limites
 
@@ -150,7 +169,9 @@ altura/projeção são critérios conservadores de diagnóstico, não metas usad
 para reposicionar o modelo. Se a CPU divergir do bake, investigar o preditor e
 modificadores antes de concluir que o GLB está errado.
 
-Risco de regressão no jogo normal: nenhum arquivo de runtime foi alterado.
+Risco de regressão da atualização: sentido das pernas mudou para a frente
+do jogador; verificar marcha e agachamento. Rig e meshes giram juntos. A
+calibração depende de cadeias válidas de pé/dedos; falha explícita se ausentes.
 Risco da instrumentação: scripts ainda sem parsing no engine; custo elevado de
 percorrer todos os vértices apenas no teste; espera de GPU somente em --inspect.
 Não chamar essas funções a cada frame do jogo.

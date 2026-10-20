@@ -60,7 +60,6 @@ func _ready() -> void:
 		return
 	add_child(soldier)
 	soldier.name = "BritishSoldierFPS"
-	soldier.rotation.y = deg_to_rad(body_yaw_degrees)
 	var skeletons: Array[Node] = soldier.find_children("*", "Skeleton3D", true, false)
 	var meshes: Array[Node] = soldier.find_children("*", "MeshInstance3D", true, false)
 	if skeletons.is_empty() or meshes.size() < 3:
@@ -182,11 +181,13 @@ func _ready() -> void:
 	# Scale the imported rig and its skinned meshes TOGETHER. This is
 	# outside the Player collider and does not alter physics or gun FOV.
 	soldier.scale = Vector3.ONE * imported_visual_scale
-	# Keep the hip 14cm behind the horizontal eye plane, not 46cm
-	# in front; boots and knees are then seen from above in FPS.
-	soldier.position = Vector3(-mid_x * imported_visual_scale,
-		-floor_y * imported_visual_scale,
-		eye_ahead_of_hips - mid_z * imported_visual_scale)
+	if not _align_feet_forward():
+		return
+	# Transform the measured anchor through the FINAL imported basis.
+	# Subtracting unrotated X/Z coordinates would move the hips away from
+	# the camera as soon as the source model needs a yaw correction.
+	var source_anchor: Vector3 = Vector3(mid_x, floor_y, mid_z)
+	soldier.position = Vector3(0.0, 0.0, eye_ahead_of_hips) - soldier.basis * source_anchor
 	measured_lower_body = true
 	print("WW2 British PlayerBody BOUNDS: mesh=%.4fm rig=%.4fm source=%s scale=%.4f normalized=%.3fm offset=%s" % [
 		garment_height, raw_rig_leg_height, visual_bounds_source,
@@ -210,6 +211,42 @@ func _ready() -> void:
 		meshes.size(), rig.get_bone_count(),
 		fps_lower_mesh_count, fps_hidden_upper_mesh_count
 	])
+
+func _align_feet_forward() -> bool:
+	# Derive source forward from the imported rig, never assume FBX/glTF +Z/-Z.
+	# Rest positions avoid recalibration from the procedural walking pose.
+	var forwards: Array[Vector3] = []
+	for side in ["L", "R"]:
+		var foot_index: int = rig.find_bone("CC_Base_" + side + "_Foot")
+		var toe_index: int = -1
+		if foot_index >= 0:
+			for child_index in rig.get_bone_children(foot_index):
+				if str(rig.get_bone_name(child_index)).to_lower().contains("toe"):
+					toe_index = child_index
+					break
+		if foot_index < 0 or toe_index < 0:
+			_fail("cannot derive forward: missing foot/toe chain for " + side)
+			return false
+		var foot: Vector3 = to_local(rig.to_global(rig.get_bone_global_rest(foot_index).origin))
+		var toe: Vector3 = to_local(rig.to_global(rig.get_bone_global_rest(toe_index).origin))
+		var forward: Vector3 = toe - foot
+		forward.y = 0.0
+		if not forward.is_finite() or forward.length_squared() < 0.00000001:
+			_fail("cannot derive forward: degenerate foot/toe direction for " + side)
+			return false
+		forwards.append(forward.normalized())
+	if forwards[0].dot(forwards[1]) < 0.25:
+		_fail("cannot derive forward: left/right feet disagree")
+		return false
+	var source_forward: Vector3 = (forwards[0] + forwards[1]).normalized()
+	var correction: float = atan2(source_forward.x, -source_forward.z)
+	# Rotate only the visual root; rig, skin and meshes stay together.
+	# The existing exported yaw remains an optional adjustment AFTER calibration.
+	soldier.basis = Basis(Vector3.UP, correction + deg_to_rad(body_yaw_degrees)) * soldier.basis
+	print("WW2 British PlayerBody FORWARD: source=%s correction=%.2f degrees" % [
+		str(source_forward), rad_to_deg(correction)
+	])
+	return true
 
 func _fail(reason: String) -> void:
 	push_error("WW2 British PlayerBody: " + reason)

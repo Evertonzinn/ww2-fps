@@ -59,11 +59,13 @@ var bad_pose_samples: int = 0
 var invalid_pose_reported: bool = false
 var last_weapon_slot: int = 1
 var last_pose_target_delta: float = 0.0
-const MAX_FINAL_GRIP_ERROR: float = 0.10
+const MAX_FINAL_GRIP_ERROR: float = 0.025
 const BAD_POSE_GRACE_FRAMES: int = 4
 
 func _ready() -> void:
 	weapon = get_parent()
+	# Weapon and SniperView update first, then sample their final transforms.
+	process_priority = 10
 	# The weapon script preloads this file. Keep this reference dynamic to
 	# avoid an import cycle (WeaponController -> FirstPersonWeaponHands -> WeaponController).
 	if weapon == null or not weapon.has_method("select_weapon"):
@@ -130,6 +132,7 @@ func set_texture_quality(high: bool) -> bool:
 		model_root.queue_free()
 	model_root = replacement
 	model_root.name = "BAMEN_RiggedArms"
+	model_root.visible = false
 	add_child(model_root)
 	model_root.rotation.y = deg_to_rad(rig_yaw_degrees)
 	skeleton = candidate_rig
@@ -161,8 +164,10 @@ func set_texture_quality(high: bool) -> bool:
 		return false
 	current_right = _target_right()
 	current_left = _target_left()
-	right_target.position = _limited(current_right, right_chain)
-	left_target.position = _limited(current_left, left_chain)
+	right_target.position = current_right
+	left_target.position = current_left
+	_fit_shoulders_to_grips(current_right, current_left)
+	_refresh_elbow_poles()
 	# The left modifier was appended after the right: when its signal
 	# fires, both arm chains have been modified on the SAME frame.
 	# Do not sample after process_frame (the engine can restore the
@@ -196,8 +201,9 @@ func _on_final_ik_pose() -> void:
 		skeleton.get_bone_global_pose(right_chain[2]).origin)
 	ik_left_wrist_world = skeleton.to_global(
 		skeleton.get_bone_global_pose(left_chain[2]).origin)
-	ik_right_error = ik_right_wrist_world.distance_to(right_target.global_position)
-	ik_left_error = ik_left_wrist_world.distance_to(left_target.global_position)
+	# Measure against the requested weapon contact, not a clamped surrogate.
+	ik_right_error = ik_right_wrist_world.distance_to(to_global(current_right))
+	ik_left_error = ik_left_wrist_world.distance_to(to_global(current_left))
 	ik_sample_weapon_slot = 2 if weapon.sniper_equipped else 1
 	ik_modifier_samples += 1
 	var valid_sample: bool = (
@@ -313,21 +319,24 @@ func _refresh_elbow_poles() -> void:
 	right_ik.magnet = skeleton.to_local(to_global(RIGHT_ELBOW_POLE))
 	left_ik.magnet = skeleton.to_local(to_global(LEFT_ELBOW_POLE))
 
-func _limited(wanted: Vector3, chain: Array[int]) -> Vector3:
-	if skeleton == null or chain.size() != 3:
-		return wanted
-	var shoulder: Vector3 = _rest_in_weapon(chain[0])
-	var elbow_rest: Vector3 = _rest_in_weapon(chain[1])
-	var wrist_rest: Vector3 = _rest_in_weapon(chain[2])
-	var reach: float = (shoulder.distance_to(elbow_rest) +
-		elbow_rest.distance_to(wrist_rest)) * MAX_REACH
-	if not is_finite(reach) or reach < 0.10:
-		return shoulder
-	var delta: Vector3 = wanted - shoulder
-	if delta.length() > reach:
-		reach_limited_frames += 1
-		return shoulder + delta.normalized() * reach
-	return wanted
+func _fit_shoulders_to_grips(right_grip: Vector3, left_grip: Vector3) -> void:
+	# A whole-rig translation preserves arm lengths and the shoulder span.
+	# Project the translation into each arm's reachable ball; never move
+	# the contact markers off the rifle merely to satisfy the IK solver.
+	for iteration in range(12):
+		var correction: float = 0.0
+		for side in range(2):
+			var chain: Array[int] = right_chain if side == 0 else left_chain
+			var grip: Vector3 = right_grip if side == 0 else left_grip
+			var shoulder: Vector3 = _rest_in_weapon(chain[0])
+			var reach: float = _rest_chain_length(chain) * MAX_REACH
+			var offset: Vector3 = grip - shoulder
+			if reach > 0.10 and offset.length() > reach:
+				var shift: Vector3 = offset.normalized() * (offset.length() - reach)
+				model_root.position += shift
+				correction = maxf(correction, shift.length())
+		if correction < 0.0001:
+			break
 
 func _target_right() -> Vector3:
 	if weapon.sniper_equipped and weapon.sniper_view != null:
@@ -385,10 +394,18 @@ func _process(delta: float) -> void:
 		pose_safe = false
 		bad_pose_samples = 0
 		last_weapon_slot = active_slot
-	current_right = current_right.lerp(wanted_right, blend)
-	current_left = current_left.lerp(wanted_left, blend)
-	right_target.position = _limited(current_right, right_chain)
-	left_target.position = _limited(current_left, left_chain)
+	# Keep contact in the weapon frame: smoothing these world-relative
+	# positions made the sniper outrun its hands during recoil/ADS.
+	# Smooth only deliberate hand travel during bolt/reload state changes.
+	var right_action: bool = weapon.sniper_view.bolt_running if sniper else (
+		weapon.bolt_timer > 0.0 or (weapon.reloading and weapon.reload_phase == 1))
+	var left_action: bool = weapon.sniper_view.reload_timer > 0.0 if sniper else weapon.reloading
+	current_right = current_right.lerp(wanted_right, blend) if right_action else wanted_right
+	current_left = current_left.lerp(wanted_left, blend) if left_action else wanted_left
+	right_target.position = current_right
+	left_target.position = current_left
+	_fit_shoulders_to_grips(current_right, current_left)
+	_refresh_elbow_poles()
 	last_pose_target_delta = maxf(
 		right_target.position.distance_to(wanted_right),
 		left_target.position.distance_to(wanted_left))

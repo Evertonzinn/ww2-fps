@@ -17,6 +17,10 @@ from pathlib import Path
 ASSETS = {
     "cobblestone": "cobblestone_01",
     "stone_wall": "stone_wall",
+    "plaster": "plastered_wall_03",
+    "roof_tiles": "clay_roof_tiles",
+    "grass_ground": "leafy_grass",
+    "tree_bark": "tree_bark_03",
 }
 MAPS = {
     "albedo": ("diffuse", "diff", "albedo", "basecolor", "base_color"),

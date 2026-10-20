@@ -2,6 +2,9 @@ class_name SniperView
 extends Node3D
 
 const ScopeOverlayScript = preload("res://sniper_scope_overlay.gd")
+const BallisticTrace = preload("res://combat/ballistic_trace.gd")
+const MUZZLE_VELOCITY_MPS: float = 790.0
+const BULLET_GRAVITY_MPS2: float = 9.81
 const BOLT_CYCLE_SECONDS: float = 0.90
 const BOLT_TRAVEL: float = 0.070
 const BOLT_LIFT_RAD: float = 0.72
@@ -109,14 +112,22 @@ func set_texture_quality(high: bool) -> bool:
 	if bolt_running or reload_timer > 0.0:
 		return false
 	quality_high = high
-	var upgraded_path: String = MAG_GLB_2K if high else MAG_GLB_1K
-	var original_path: String = GLB_2K if high else GLB_1K
-	var path: String = upgraded_path if ResourceLoader.exists(upgraded_path) else original_path
-	if path != upgraded_path:
-		push_warning("Sniper v095 magazine asset missing; original rifle fallback: " + upgraded_path)
-	if not ResourceLoader.exists(path):
-		push_warning("Sniper GLB ausente: " + path)
+	var preferred_mag: String = MAG_GLB_2K if high else MAG_GLB_1K
+	var preferred_original: String = GLB_2K if high else GLB_1K
+	var fallback_mag: String = MAG_GLB_1K if high else MAG_GLB_2K
+	var fallback_original: String = GLB_1K if high else GLB_2K
+	var path: String = ""
+	for candidate in [preferred_mag, preferred_original, fallback_mag, fallback_original]:
+		if ResourceLoader.exists(candidate):
+			path = candidate
+			break
+	if path.is_empty():
+		push_warning("Sniper GLB absent in 1K and 2K qualities")
 		return false
+	if path == fallback_mag or path == fallback_original:
+		push_warning("Sniper: preferred texture quality missing; using available GLB " + path)
+	if path == preferred_original or path == fallback_original:
+		push_warning("Sniper: magazine v095 asset unavailable; base rifle model used")
 	var packed: PackedScene = ResourceLoader.load(path) as PackedScene
 	if packed == null:
 		return false
@@ -195,13 +206,16 @@ func _fire() -> void:
 	player_body.call("report_gunshot")
 	_start_bolt_cycle()
 	var origin: Vector3 = camera.global_position
-	var dest: Vector3 = origin - camera.global_transform.basis.z * MAX_RANGE
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, dest)
-	query.exclude = [player_body.get_rid()]
-	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	var direction: Vector3 = -camera.global_transform.basis.z
+	var excluded: Array[RID] = [player_body.get_rid()]
+	var hit: Dictionary = BallisticTrace.trace(get_world_3d().direct_space_state,
+		origin, direction, MAX_RANGE, MUZZLE_VELOCITY_MPS, BULLET_GRAVITY_MPS2, excluded)
 	if not hit.is_empty():
 		var target: Object = hit.get("collider")
-		if target != null and target.has_method("take_damage"):
+		if target != null and target.has_method("take_sniper_damage"):
+			target.call("take_sniper_damage")
+			hud.call("show_hit_marker")
+		elif target != null and target.has_method("take_damage"):
 			target.call("take_damage", 1)
 			hud.call("show_hit_marker")
 	if magazine == 0 and reserve > 0:

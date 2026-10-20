@@ -33,6 +33,7 @@ ASSETS = {
     "animated_fps_hands_rifle_animation_pack.zip": "characters/animated_fps_hands_reference",
 }
 MAX_ZIP_MEMBERS = 300
+MAX_GLTF_METADATA_BYTES = 32 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024
 ALLOWED = {".gltf", ".bin", ".png", ".jpg", ".jpeg", ".webp", ".txt", ".md"}
@@ -55,6 +56,8 @@ def safe_members(archive: ZipFile):
             continue
         if info.file_size > MAX_MEMBER_BYTES:
             raise ValueError("oversized member: " + info.filename)
+        if p.suffix.lower() == ".gltf" and info.file_size > MAX_GLTF_METADATA_BYTES:
+            raise ValueError("oversized glTF JSON metadata: " + info.filename)
         # Refuse special files and symlinks; ordinary ZIPs often have no UNIX mode.
         mode = (info.external_attr >> 16) & 0o170000
         if mode not in (0, 0o100000):
@@ -62,7 +65,11 @@ def safe_members(archive: ZipFile):
         yield info
 
 def validate_gltf(scene_file: Path, package_root: Path) -> dict:
+    if scene_file.stat().st_size > MAX_GLTF_METADATA_BYTES:
+        raise ValueError("oversized glTF JSON metadata")
     data = json.loads(scene_file.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("glTF root must be an object")
     if data.get("asset", {}).get("version") != "2.0":
         raise ValueError("not a glTF 2.0 asset")
     # All external refs must stay within this isolated asset folder.
@@ -79,6 +86,8 @@ def validate_gltf(scene_file: Path, package_root: Path) -> dict:
         resolved = (scene_file.parent / rel).resolve()
         if not resolved.is_relative_to(package_root.resolve()) or not resolved.is_file():
             raise ValueError("missing/unsafe referenced file: " + uri)
+    if not data.get("meshes"):
+        raise ValueError("glTF has no meshes; refusing empty visual import")
     return {
         "mesh_count": len(data.get("meshes", [])),
         "skin_count": len(data.get("skins", [])),

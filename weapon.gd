@@ -80,6 +80,7 @@ func select_weapon(slot: int) -> void:
 		if not sniper_view.equip():
 			return
 		sniper_equipped = true
+		_set_legacy_rifle_visible(false)
 		if rifle_instance != null:
 			rifle_instance.visible = false
 		muzzle_flash.visible = false
@@ -91,8 +92,15 @@ func select_weapon(slot: int) -> void:
 		sniper_view.unequip()
 		if rifle_instance != null:
 			rifle_instance.visible = true
+		else:
+			_set_legacy_rifle_visible(true)
 		position = HIP_POSITION
 		_update_hud()
+
+func _set_legacy_rifle_visible(show: bool) -> void:
+	for child in get_children():
+		if child is MeshInstance3D and child != muzzle_flash:
+			(child as MeshInstance3D).visible = show
 
 func request_fire() -> void:
 	if sniper_equipped:

@@ -65,6 +65,8 @@ func _ready() -> void:
 	first_person_arms = ArmsVisual.new() as FirstPersonArms
 	first_person_arms.name = "FirstPersonArms"
 	add_child(first_person_arms)
+	# Import skinned BAMEN asset in 1K by default; the rifle stays independent.
+	first_person_arms.set_texture_quality(false)
 	# Without a GLB, the scene's original procedural meshes remain visible.
 	_equip_real_rifle(2)
 	shot_audio.stream = _placeholder_sound(true)
@@ -253,9 +255,12 @@ func set_texture_quality(high_quality: bool) -> bool:
 	if reloading or pending_reload or bolt_timer > 0.0:
 		return false
 	var size: int = 2 if high_quality else 1
-	if rifle_instance != null and active_texture_size == size:
-		return true
-	return _equip_real_rifle(size)
+	var rifle_ok: bool = true
+	if rifle_instance == null or active_texture_size != size:
+		rifle_ok = _equip_real_rifle(size)
+	if rifle_ok and first_person_arms != null:
+		first_person_arms.set_texture_quality(high_quality)
+	return rifle_ok
 
 func _equip_real_rifle(size: int) -> bool:
 	var sources: Array[String] = [

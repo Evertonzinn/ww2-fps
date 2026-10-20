@@ -18,6 +18,7 @@ const AIM_FOV: float = 55.0
 
 const MODEL_DIRECTORY: String = "res://assets/weapons/lee_enfield/"
 const ReloadEffects = preload("res://weapon_reload_fx.gd")
+const SniperViewScript = preload("res://sniper_view.gd")
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -52,6 +53,9 @@ var action_clip: StringName = &""
 var open_clip: StringName = &""
 var close_clip: StringName = &""
 var reload_fx: RifleReloadFx
+var sniper_view: SniperView
+var sniper_equipped: bool = false
+var requested_high_texture: bool = false
 
 func _ready() -> void:
 	position = HIP_POSITION
@@ -64,11 +68,42 @@ func _ready() -> void:
 	shot_audio.stream = _placeholder_sound(true)
 	reload_audio.stream = _placeholder_sound(false)
 	_update_hud()
+	sniper_view = SniperViewScript.new() as SniperView
+	sniper_view.name = "SniperView"
+	add_child(sniper_view)
+
+func select_weapon(slot: int) -> void:
+	if slot == 2:
+		if sniper_equipped or reloading or pending_reload or bolt_timer > 0.0:
+			return
+		sniper_view.quality_high = requested_high_texture
+		if not sniper_view.equip():
+			return
+		sniper_equipped = true
+		if rifle_instance != null:
+			rifle_instance.visible = false
+		muzzle_flash.visible = false
+		position = Vector3.ZERO
+	elif slot == 1:
+		if not sniper_equipped or sniper_view.is_busy():
+			return
+		sniper_equipped = false
+		sniper_view.unequip()
+		if rifle_instance != null:
+			rifle_instance.visible = true
+		position = HIP_POSITION
+		_update_hud()
 
 func request_fire() -> void:
+	if sniper_equipped:
+		sniper_view.request_fire()
+		return
 	pending_shot = true
 
 func request_reload() -> void:
+	if sniper_equipped:
+		sniper_view.request_reload()
+		return
 	if reloading or pending_reload or magazine >= MAGAZINE_SIZE or reserve_ammo <= 0:
 		return
 	if bolt_timer > 0.0:
@@ -78,6 +113,8 @@ func request_reload() -> void:
 		_start_reload()
 
 func _physics_process(delta: float) -> void:
+	if sniper_equipped:
+		return
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	bolt_timer = maxf(0.0, bolt_timer - delta)
 
@@ -120,6 +157,8 @@ func _physics_process(delta: float) -> void:
 			_fire_hitscan()
 
 func _process(delta: float) -> void:
+	if sniper_equipped:
+		return
 	var aiming: bool = not reloading and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	var moving: bool = player_body.is_on_floor() and Vector2(player_body.velocity.x, player_body.velocity.z).length_squared() > 0.8
 	if moving:
@@ -242,6 +281,9 @@ func _update_hud() -> void:
 		ammo_label.text += "  SEM MUNICAO"
 
 func set_texture_quality(high_quality: bool) -> bool:
+	requested_high_texture = high_quality
+	if sniper_equipped:
+		return sniper_view.set_texture_quality(high_quality)
 	if reloading or pending_reload or bolt_timer > 0.0:
 		return false
 	var size: int = 2 if high_quality else 1

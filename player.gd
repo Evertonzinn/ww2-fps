@@ -24,6 +24,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			graphics_menu.open_menu()
 		elif event.keycode == KEY_R and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 			weapon.request_reload()
+		elif event.keycode == KEY_1 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			weapon.select_weapon(1)
+		elif event.keycode == KEY_2 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			weapon.select_weapon(2)
 
 	if graphics_menu.is_open:
 		return

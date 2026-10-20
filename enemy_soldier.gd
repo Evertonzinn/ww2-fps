@@ -34,10 +34,14 @@ var death_elapsed: float = 0.0
 var zones: Array[CollisionShape3D] = []
 var bones: Dictionary = {}
 var initial_rotations: Dictionary = {}
+var last_visual_position: Vector3
+var walk_blend: float = 0.0
+var breath_phase: float = 0.0
 
 func _ready() -> void:
 	health = max_health
 	origin = global_position
+	last_visual_position = global_position
 	# Parent capsule cannot intercept the seven precise raycast hitboxes.
 	collision_layer = 0
 	collision_mask = 0
@@ -64,6 +68,9 @@ func _ready() -> void:
 	model.name = "PanzergrenadierVisual"
 	add_child(model)
 	model.scale = Vector3.ONE * MODEL_SCALE
+	# The supplied Mixamo mesh/toes face +Z; combat and gun use -Z.
+	# Rotate only the visual, never the combat root or hitboxes.
+	model.rotation.y = PI
 	model.position.y = FOOT_LIFT
 	var meshes: Array[Node] = model.find_children("*", "MeshInstance3D", true, false)
 	if meshes.is_empty():
@@ -93,12 +100,31 @@ func _prepare_bone_tracks() -> void:
 	])
 	for name in expected:
 		for index in range(rig.get_bone_count()):
-			var stem: String = rig.get_bone_name(index).split(":")[-1].split("_")[0]
+			var stem: String = _bone_stem(rig.get_bone_name(index))
 			if stem == name:
 				bones[name] = index
 				initial_rotations[index] = rig.get_bone_pose_rotation(index)
 				break
+	# Finger joints are visual only; use the same verified namespace handling.
+	for index in range(rig.get_bone_count()):
+		var stem: String = _bone_stem(rig.get_bone_name(index))
+		if stem.begins_with("LeftHand") or stem.begins_with("RightHand"):
+			bones[stem] = index
+			initial_rotations[index] = rig.get_bone_pose_rotation(index)
+	for name in expected:
+		if not bones.has(name):
+			push_error("Enemy rig: required bone not mapped: " + name)
 	print("WW2 FPS enemy: animation bones mapped=", bones.size())
+
+static func _bone_stem(bone_name: String) -> String:
+	# Godot sanitizes glTF ':' to '_': mixamorig:RightArm_48 becomes
+	# mixamorig_RightArm_48. Remove the namespace BEFORE the numeric suffix.
+	return bone_name.replace(":", "_").trim_prefix("mixamorig_").get_slice("_", 0)
+
+func get_rifle_mount_transform() -> Transform3D:
+	if rig == null or not bones.has("Spine2"):
+		return Transform3D.IDENTITY
+	return global_transform.affine_inverse() * rig.global_transform * rig.get_bone_global_pose(int(bones["Spine2"]))
 
 func _physics_process(delta: float) -> void:
 	is_walking = false
@@ -137,8 +163,13 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 	flinch_left = maxf(0.0, flinch_left - delta)
-	walk_phase += delta * (8.0 if is_walking else 1.8)
-	model.position.y = FOOT_LIFT + (absf(sin(walk_phase)) * 0.012 if is_walking else sin(walk_phase) * 0.003)
+	var displacement: Vector3 = global_position - last_visual_position
+	displacement.y = 0.0
+	last_visual_position = global_position
+	walk_phase += displacement.length() * TAU / 1.15
+	walk_blend = move_toward(walk_blend, 1.0 if is_walking else 0.0, delta * 6.0)
+	breath_phase += delta * 1.8
+	model.position.y = FOOT_LIFT + absf(sin(walk_phase)) * 0.008 * walk_blend + sin(breath_phase) * 0.002
 	_update_bone_pose()
 	if feedback_left > 0.0:
 		feedback_left = maxf(0.0, feedback_left - delta)
@@ -153,12 +184,12 @@ func _update_bone_pose() -> void:
 	if rig == null:
 		return
 	var gait: float = sin(walk_phase)
-	var walk_factor: float = 1.0 if is_walking else 0.0
+	var walk_factor: float = walk_blend
 	var flinch: float = flinch_left / 0.35
 	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor)
 	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor)
-	_pose("LeftLeg", Vector3.RIGHT, maxf(0.0, -gait) * 0.24 * walk_factor)
-	_pose("RightLeg", Vector3.RIGHT, maxf(0.0, gait) * 0.24 * walk_factor)
+	_pose("LeftLeg", Vector3.RIGHT, -maxf(0.0, gait) * 0.55 * walk_factor)
+	_pose("RightLeg", Vector3.RIGHT, -maxf(0.0, -gait) * 0.55 * walk_factor)
 	# Arms are solved to the rifle grips in the combat child, after gait.
 	# Keep a neutral natural swing if the rifle has not been created.
 	if combat == null:
@@ -185,14 +216,41 @@ func _pose(name: String, axis: Vector3, angle: float) -> void:
 	var baseline: Quaternion = initial_rotations[index]
 	rig.set_bone_pose_rotation(index, Quaternion(parent_axis.normalized(), angle) * baseline)
 
-func pose_rifle_hands(right_grip: Vector3, left_grip: Vector3) -> void:
+func pose_rifle_hands(right_grip: Transform3D, left_grip: Transform3D) -> void:
 	if rig == null or eliminated:
 		return
 	# Solve both upper arm + forearm to real 3D grip targets; no fake arms.
+	# Markers locate palm contact, not the wrist joint. +Y follows the fingers.
+	var palm_offset: Vector3 = Vector3(0, 0.045, 0)
 	_solve_two_bone_arm("RightArm", "RightForeArm", "RightHand",
-		right_grip, to_global(Vector3(0.43, 1.10, 0.10)))
+		right_grip.origin - right_grip.basis * palm_offset, to_global(Vector3(0.34, 1.09, 0.02)))
 	_solve_two_bone_arm("LeftArm", "LeftForeArm", "LeftHand",
-		left_grip, to_global(Vector3(-0.43, 1.10, 0.08)))
+		left_grip.origin - left_grip.basis * palm_offset, to_global(Vector3(-0.30, 1.10, -0.12)))
+	_orient_hand("RightHand", right_grip.basis)
+	_orient_hand("LeftHand", left_grip.basis)
+	_curl_fingers("Right", 1.0)
+	_curl_fingers("Left", -1.0)
+
+func _orient_hand(hand_name: String, world_basis: Basis) -> void:
+	if not bones.has(hand_name):
+		return
+	var index: int = int(bones[hand_name])
+	var parent_basis: Basis = rig.get_bone_global_pose(rig.get_bone_parent(index)).basis.orthonormalized()
+	var desired: Basis = rig.global_transform.basis.orthonormalized().inverse() * world_basis.orthonormalized()
+	rig.set_bone_pose_rotation(index, (parent_basis.inverse() * desired).get_rotation_quaternion())
+
+func _curl_fingers(side: String, curl_sign: float) -> void:
+	# Local +Y is along each phalanx in this rig; local Z closes the fingers.
+	# Keep the firing index less curled. Preserve original thumb opposition.
+	for finger in ["Index", "Middle", "Ring", "Pinky"]:
+		for joint in range(1, 4):
+			var name: String = side + "Hand" + finger + str(joint)
+			if not bones.has(name):
+				continue
+			var index: int = int(bones[name])
+			var angle: float = 0.30 if finger == "Index" and side == "Right" else 0.65
+			var baseline: Quaternion = initial_rotations[index]
+			rig.set_bone_pose_rotation(index, baseline * Quaternion(Vector3.BACK, angle * curl_sign))
 
 func _solve_two_bone_arm(upper_name: String, lower_name: String,
 		hand_name: String, hand_world: Vector3, elbow_hint_world: Vector3) -> void:

@@ -22,8 +22,12 @@ var last_seen: Vector3
 var right_grip: Marker3D
 var left_grip: Marker3D
 var recoil_left: float = 0.0
+var gun_rest: Transform3D
+var mount_rest: Transform3D
 
 func _ready() -> void:
+	# Gait/spine pose must finish before mounting the gun and solving the arms.
+	process_priority = 1
 	soldier = get_parent() as AnimatableBody3D
 	player = get_tree().current_scene.get_node_or_null("Player") as CharacterBody3D
 	if player == null:
@@ -94,9 +98,11 @@ func _process(delta: float) -> void:
 	if gun == null or soldier == null or bool(soldier.get("eliminated")):
 		return
 	recoil_left = maxf(0.0, recoil_left - delta)
-	gun.rotation.x = -0.045 + 0.11 * (recoil_left / 0.16)
+	var mount: Transform3D = soldier.call("get_rifle_mount_transform")
+	gun.transform = mount * mount_rest.affine_inverse() * gun_rest
+	gun.transform = gun.transform * Transform3D(Basis(Vector3.RIGHT, 0.11 * (recoil_left / 0.16)), Vector3.ZERO)
 	if right_grip != null and left_grip != null:
-		soldier.call("pose_rifle_hands", right_grip.global_position, left_grip.global_position)
+		soldier.call("pose_rifle_hands", right_grip.global_transform, left_grip.global_transform)
 
 func _excluded() -> Array[RID]:
 	var rids: Array[RID] = [soldier.get_rid()]
@@ -148,9 +154,11 @@ func _create_gun() -> void:
 	gun.name = "EnemyRiflePrototype"
 	# Orient the complete rifle muzzle-forward in the model's -Z axis,
 	# just in front of the sternum, not behind its back.
-	gun.position = Vector3(0.00, 1.33, -0.21)
+	gun.position = Vector3(0.13, 1.36, -0.23)
 	gun.rotation.x = -0.045
 	soldier.add_child(gun)
+	gun_rest = gun.transform
+	mount_rest = soldier.call("get_rifle_mount_transform")
 	var wood: StandardMaterial3D = StandardMaterial3D.new()
 	wood.albedo_color = Color(0.25, 0.12, 0.058)
 	wood.roughness = 0.83
@@ -158,14 +166,14 @@ func _create_gun() -> void:
 	steel.albedo_color = Color(0.09, 0.10, 0.11)
 	steel.metallic = 0.68
 	steel.roughness = 0.48
-	_box("Stock", Vector3(0, -0.02, 0.22), Vector3(0.11, 0.10, 0.44), wood)
-	_box("Receiver", Vector3(0, 0, -0.07), Vector3(0.12, 0.12, 0.23), steel)
-	_box("Handguard", Vector3(0, -0.015, -0.32), Vector3(0.085, 0.075, 0.33), wood)
+	_box("Stock", Vector3(0.025, -0.02, 0.12), Vector3(0.065, 0.09, 0.30), wood)
+	_box("Receiver", Vector3(0, 0, -0.07), Vector3(0.055, 0.065, 0.23), steel)
+	_box("Handguard", Vector3(0, -0.015, -0.32), Vector3(0.05, 0.055, 0.33), wood)
 	var barrel: MeshInstance3D = MeshInstance3D.new()
 	barrel.name = "Barrel"
 	var mesh: CylinderMesh = CylinderMesh.new()
-	mesh.top_radius = 0.013
-	mesh.bottom_radius = 0.015
+	mesh.top_radius = 0.009
+	mesh.bottom_radius = 0.011
 	mesh.height = 0.58
 	mesh.radial_segments = 12
 	barrel.mesh = mesh
@@ -176,11 +184,17 @@ func _create_gun() -> void:
 	# IK markers in the exact same visual-gun coordinate system.
 	right_grip = Marker3D.new()
 	right_grip.name = "TriggerGrip"
-	right_grip.position = Vector3(-0.08, -0.07, 0.09)
+	right_grip.position = Vector3(0.02, -0.06, 0.065)
+	var trigger_fingers: Vector3 = Vector3(-0.4, 0.65, -0.65).normalized()
+	var trigger_across: Vector3 = Vector3.BACK.slide(trigger_fingers).normalized()
+	right_grip.basis = Basis(trigger_fingers.cross(trigger_across).normalized(), trigger_fingers, trigger_across)
 	gun.add_child(right_grip)
 	left_grip = Marker3D.new()
 	left_grip.name = "SupportGrip"
-	left_grip.position = Vector3(0.06, -0.08, -0.20)
+	left_grip.position = Vector3(-0.025, -0.05, -0.10)
+	# Palm faces up; fingers follow the forearm diagonally, avoiding a bent wrist.
+	var support_fingers: Vector3 = Vector3(0.8, 0, -0.6)
+	left_grip.basis = Basis(Vector3.UP, support_fingers, Vector3.UP.cross(support_fingers))
 	gun.add_child(left_grip)
 
 func _box(part: String, where: Vector3, dimensions: Vector3, material: Material) -> void:

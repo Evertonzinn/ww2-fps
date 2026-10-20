@@ -31,6 +31,12 @@ func _run() -> void:
 	if hands.skeleton == null or hands.skeleton.get_bone_count() < 50:
 		_fail("invalid original rigged hand skeleton")
 		return
+	if hands.skeleton.modifier_callback_mode_process != Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE:
+		_fail("IK modifier and Weapon viewmodel do not use the same idle frame timing")
+		return
+	if hands._rest_chain_length(hands.right_chain) < 0.45 or hands._rest_chain_length(hands.left_chain) < 0.45:
+		_fail("real original arm length missing/incorrect scale")
+		return
 	if hands.right_ik == null or hands.left_ik == null:
 		_fail("two arm IK chains were not created")
 		return
@@ -80,7 +86,7 @@ func _run() -> void:
 	if not is_finite(lee_right_error) or not is_finite(lee_left_error):
 		_fail("Lee grip IK produced non-finite wrist positions")
 		return
-	if lee_right_error > 0.18 or lee_left_error > 0.18:
+	if lee_right_error > 0.10 or lee_left_error > 0.10 or hands.pose_safe != true:
 		_fail("Lee wrists did not reach weapon grips (right=%.3fm left=%.3fm)" % [
 			lee_right_error, lee_left_error
 		])
@@ -123,7 +129,7 @@ func _run() -> void:
 	if not is_finite(sniper_right_error) or not is_finite(sniper_left_error):
 		_fail("sniper IK produced non-finite wrist positions")
 		return
-	if sniper_right_error > 0.18 or sniper_left_error > 0.18:
+	if sniper_right_error > 0.10 or sniper_left_error > 0.10 or hands.pose_safe != true:
 		_fail("sniper wrists did not reach weapon grips (right=%.3fm left=%.3fm)" % [
 			sniper_right_error, sniper_left_error
 		])

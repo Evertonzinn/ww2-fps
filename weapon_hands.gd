@@ -20,6 +20,10 @@ const SNIPER_LEFT_MAGAZINE: Vector3 = Vector3(-0.07, -0.30, -0.29)
 const LEE_SHOULDERS: Vector3 = Vector3(0.03, -0.30, -0.10)
 const SNIPER_SHOULDERS: Vector3 = Vector3(0.18, -0.32, -0.57)
 const MAX_REACH: float = 0.96
+# Stable elbow pole positions in Weapon-local space. These are recalculated
+# in skeleton space AFTER repositioning the rig every frame.
+const RIGHT_ELBOW_POLE: Vector3 = Vector3(0.43, -0.55, 0.10)
+const LEFT_ELBOW_POLE: Vector3 = Vector3(-0.43, -0.55, -0.12)
 
 @export_range(3.0, 30.0, 0.5) var pose_speed: float = 15.0
 @export_range(-180.0, 180.0, 1.0) var rig_yaw_degrees: float = 0.0
@@ -53,6 +57,8 @@ var ik_sample_weapon_slot: int = 1
 var pose_safe: bool = false
 var bad_pose_samples: int = 0
 var invalid_pose_reported: bool = false
+var last_weapon_slot: int = 1
+var last_pose_target_delta: float = 0.0
 const MAX_FINAL_GRIP_ERROR: float = 0.10
 const BAD_POSE_GRACE_FRAMES: int = 4
 
@@ -122,6 +128,10 @@ func set_texture_quality(high: bool) -> bool:
 	add_child(model_root)
 	model_root.rotation.y = deg_to_rad(rig_yaw_degrees)
 	skeleton = candidate_rig
+	# The camera/Weapon viewmodel, IK markers and cosmetic hands all
+	# animate in _process. Run SkeletonModifier3D in IDLE too, otherwise
+	# physics-tick modifiers can sample a different target pose and jitter.
+	skeleton.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE
 	right_chain = right_indices
 	left_chain = left_indices
 	var right_rest: Vector3 = _rest_in_weapon(right_chain[0])
@@ -132,9 +142,9 @@ func set_texture_quality(high: bool) -> bool:
 	var shoulder: Vector3 = SNIPER_SHOULDERS if weapon.sniper_equipped else LEE_SHOULDERS
 	model_root.position = shoulder - resting_shoulder_mid
 	right_ik = _make_ik("RightArmGripIK", right_chain, right_target,
-		Vector3(0.47, -0.51, -0.33))
+		RIGHT_ELBOW_POLE)
 	left_ik = _make_ik("LeftArmSupportIK", left_chain, left_target,
-		Vector3(-0.46, -0.50, -0.43))
+		LEFT_ELBOW_POLE)
 	# A previous release called start() with invalid target_node paths,
 	# printed READY, and left both wrists >30cm from the rifle. Never
 	# start or expose the rig until BOTH IK paths resolve to the markers.
@@ -159,9 +169,16 @@ func set_texture_quality(high: bool) -> bool:
 		_disable_invalid_rig("IK solver failed to start")
 		return false
 	active_quality = chosen
+	last_weapon_slot = 2 if weapon.sniper_equipped else 1
 	hands_initialized = true
+	# Never show hands until final solved wrists are measured (v0.16.3).
+	# Report actual per-bone arm lengths to distinguish unreachable grips.
 	print("WW2 FPS HANDS READY: %d bones, %d skinned meshes, quality=%dk, dual IK" % [
 		skeleton.get_bone_count(), meshes.size(), active_quality
+	])
+	print("WW2 FPS HANDS ANATOMY: right=%.3fm left=%.3fm shoulders=%s" % [
+		_rest_chain_length(right_chain), _rest_chain_length(left_chain),
+		str(resting_shoulder_mid)
 	])
 	return true
 
@@ -274,6 +291,23 @@ func _make_ik(label: String, chain: Array[int], marker: Marker3D,
 func _rest_in_weapon(index: int) -> Vector3:
 	return to_local(skeleton.to_global(skeleton.get_bone_global_rest(index).origin))
 
+func _rest_chain_length(chain: Array[int]) -> float:
+	if chain.size() != 3:
+		return 0.0
+	var a: Vector3 = _rest_in_weapon(chain[0])
+	var b: Vector3 = _rest_in_weapon(chain[1])
+	var c: Vector3 = _rest_in_weapon(chain[2])
+	return a.distance_to(b) + b.distance_to(c)
+
+func _refresh_elbow_poles() -> void:
+	if skeleton == null or right_ik == null or left_ik == null:
+		return
+	# Godot IK magnet is a position in SKELETON coordinates. A constant
+	# calculated only during _ready becomes stale while shoulders shift
+	# for sniper/Lee and ADS. Refresh after repositioning the rig.
+	right_ik.magnet = skeleton.to_local(to_global(RIGHT_ELBOW_POLE))
+	left_ik.magnet = skeleton.to_local(to_global(LEFT_ELBOW_POLE))
+
 func _limited(wanted: Vector3, chain: Array[int]) -> Vector3:
 	if skeleton == null or chain.size() != 3:
 		return wanted
@@ -330,12 +364,26 @@ func _process(delta: float) -> void:
 	# Update IK targets even when the model is hidden: the pose
 	# must be allowed to converge and recover without toggling.
 	# Scope visibility alone does not control the solver.
+	var active_slot: int = 2 if sniper else 1
 	var target_shoulder: Vector3 = SNIPER_SHOULDERS if sniper else LEE_SHOULDERS
-	model_root.position = model_root.position.lerp(
-		target_shoulder - resting_shoulder_mid,
-		minf(1.0, delta * pose_speed))
 	var blend: float = minf(1.0, delta * pose_speed)
-	current_right = current_right.lerp(_target_right(), blend)
-	current_left = current_left.lerp(_target_left(), blend)
+	# Camera and hands share this _process phase. Do not animate an
+	# IK target in physics while the weapon itself animates in idle.
+	model_root.position = model_root.position.lerp(
+		target_shoulder - resting_shoulder_mid, blend)
+	_refresh_elbow_poles()
+	var wanted_right: Vector3 = _target_right()
+	var wanted_left: Vector3 = _target_left()
+	if active_slot != last_weapon_slot:
+		# A weapon switch changes grip locations immediately. Avoid
+		# retaining stale 'pose_safe' from the previous rifle.
+		pose_safe = false
+		bad_pose_samples = 0
+		last_weapon_slot = active_slot
+	current_right = current_right.lerp(wanted_right, blend)
+	current_left = current_left.lerp(wanted_left, blend)
 	right_target.position = _limited(current_right, right_chain)
 	left_target.position = _limited(current_left, left_chain)
+	last_pose_target_delta = maxf(
+		right_target.position.distance_to(wanted_right),
+		left_target.position.distance_to(wanted_left))

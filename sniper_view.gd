@@ -1,6 +1,11 @@
 class_name SniperView
 extends Node3D
 
+const ScopeOverlayScript = preload("res://sniper_scope_overlay.gd")
+const BOLT_CYCLE_SECONDS: float = 0.90
+const BOLT_TRAVEL: float = 0.070
+const BOLT_LIFT_RAD: float = 0.72
+
 # Separate 5-round scoped gun with no imported animations. CC BY 4.0 asset.
 const GLB_1K: String = "res://assets/weapons/sniper/sniper_rifle_1k.glb"
 const GLB_2K: String = "res://assets/weapons/sniper/sniper_rifle_2k.glb"
@@ -29,6 +34,10 @@ var scope_layer: CanvasLayer
 var flash: MeshInstance3D
 var shot_audio: AudioStreamPlayer
 var reload_audio: AudioStreamPlayer
+var bolt_mesh: MeshInstance3D
+var bolt_rest: Transform3D
+var bolt_elapsed: float = 0.0
+var bolt_running: bool = false
 
 func _ready() -> void:
 	camera = get_parent().get_parent() as Camera3D
@@ -60,9 +69,11 @@ func unequip() -> void:
 		scope_layer.visible = false
 
 func is_busy() -> bool:
-	return reload_timer > 0.0 or shot_timer > 0.0
+	return reload_timer > 0.0 or shot_timer > 0.0 or bolt_running
 
 func set_texture_quality(high: bool) -> bool:
+	if bolt_running or reload_timer > 0.0:
+		return false
 	quality_high = high
 	var path: String = GLB_2K if high else GLB_1K
 	if not ResourceLoader.exists(path):
@@ -76,12 +87,13 @@ func set_texture_quality(high: bool) -> bool:
 		return false
 	new_rifle.name = "MartinTrafasSniper"
 	# Source muzzle points -Y, scope +Z. Reorient to Godot forward -Z, up +Y.
-	new_rifle.basis = Basis(Vector3.UP, PI) * Basis(Vector3.RIGHT, -PI * 0.5)
+	new_rifle.basis = Basis.IDENTITY
 	new_rifle.position = Vector3(0.0, 0.025, -0.30)
 	add_child(new_rifle)
 	if rifle != null and is_instance_valid(rifle):
 		rifle.queue_free()
 	rifle = new_rifle
+	_bind_bolt()
 	return true
 
 func request_fire() -> void:
@@ -114,6 +126,7 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	if not active:
 		return
+	_update_bolt(delta)
 	var aiming: bool = reload_timer <= 0.0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	var desired: Vector3 = ADS if aiming else HIP
 	desired.z += recoil
@@ -134,6 +147,7 @@ func _fire() -> void:
 	recoil = 0.11
 	flash_timer = 0.06
 	shot_audio.play()
+	_start_bolt_cycle()
 	var origin: Vector3 = camera.global_position
 	var dest: Vector3 = origin - camera.global_transform.basis.z * MAX_RANGE
 	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, dest)
@@ -156,21 +170,73 @@ func _update_hud() -> void:
 		ammo.text += "  SEM MUNICAO"
 
 func _make_scope() -> void:
+	# A real Control draw pass, not a shader-driven zero-size ColorRect.
 	scope_layer = CanvasLayer.new()
 	scope_layer.name = "SniperScopeHUD"
 	scope_layer.layer = 6
 	get_tree().current_scene.add_child(scope_layer)
-	var mask: ColorRect = ColorRect.new()
-	mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var shader: Shader = Shader.new()
-	# One overlay pass; no extra rendered 3D camera on GT 730.
-	shader.code = "shader_type canvas_item;\nvoid fragment() {\nvec2 px=(UV-vec2(0.5))/SCREEN_PIXEL_SIZE;\nfloat r=min(1.0/SCREEN_PIXEL_SIZE.x,1.0/SCREEN_PIXEL_SIZE.y)*0.37;\nfloat d=length(px);\nfloat outside=smoothstep(r-2.0,r+2.0,d);\nfloat ring=1.0-smoothstep(1.0,3.0,abs(d-r));\nfloat cross=max(1.0-smoothstep(0.4,1.5,abs(px.x)),1.0-smoothstep(0.4,1.5,abs(px.y)));\ncross*=1.0-smoothstep(r*0.72,r*0.74,d);\nCOLOR=vec4(vec3(0.02),clamp(max(outside,max(ring,cross)),0.0,1.0));\n}\n"
-	var material: ShaderMaterial = ShaderMaterial.new()
-	material.shader = shader
-	mask.material = material
-	scope_layer.add_child(mask)
+	var overlay: Control = ScopeOverlayScript.new() as Control
+	overlay.name = "SniperScopeReticle"
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scope_layer.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.queue_redraw()
 	scope_layer.visible = false
+
+func _bind_bolt() -> void:
+	bolt_mesh = null
+	bolt_running = false
+	bolt_elapsed = 0.0
+	if rifle == null:
+		return
+	# Original GLB: Object_4 is the separate bolt body/side handle mesh.
+	var candidates: Array[Node] = rifle.find_children("Object_4*", "MeshInstance3D", true, false)
+	if candidates.is_empty():
+		push_warning("Sniper: Object_4 bolt mesh not found; weapon remains static.")
+		return
+	bolt_mesh = candidates[0] as MeshInstance3D
+	if bolt_mesh == null:
+		return
+	bolt_rest = bolt_mesh.transform
+	print("Sniper: original bolt linked: ", bolt_mesh.name)
+
+func _start_bolt_cycle() -> void:
+	if bolt_mesh == null or not is_instance_valid(bolt_mesh):
+		return
+	bolt_mesh.transform = bolt_rest
+	bolt_running = true
+	bolt_elapsed = 0.0
+
+func _update_bolt(delta: float) -> void:
+	if not bolt_running:
+		return
+	if bolt_mesh == null or not is_instance_valid(bolt_mesh):
+		bolt_running = false
+		return
+	bolt_elapsed += delta
+	var p: float = minf(1.0, bolt_elapsed / BOLT_CYCLE_SECONDS)
+	var lift: float = 0.0
+	var pull: float = 0.0
+	# In source coordinates barrel points +Y: -Y moves toward the stock.
+	if p < 0.20:
+		lift = _ease(p / 0.20)
+	elif p < 0.50:
+		lift = 1.0
+		pull = _ease((p - 0.20) / 0.30)
+	elif p < 0.78:
+		lift = 1.0
+		pull = 1.0 - _ease((p - 0.50) / 0.28)
+	else:
+		lift = 1.0 - _ease((p - 0.78) / 0.22)
+	var movement: Transform3D = Transform3D(Basis(Vector3.UP, lift * BOLT_LIFT_RAD), Vector3(0, -pull * BOLT_TRAVEL, 0))
+	bolt_mesh.transform = bolt_rest * movement
+	if p >= 1.0:
+		bolt_mesh.transform = bolt_rest
+		bolt_running = false
+
+func _ease(t: float) -> float:
+	var v: float = clampf(t, 0.0, 1.0)
+	return v * v * (3.0 - 2.0 * v)
 
 func _make_flash() -> void:
 	flash = MeshInstance3D.new()

@@ -1,122 +1,218 @@
-extends StaticBody3D
+extends AnimatableBody3D
 
-# v0.10.1 visual-availability diagnostic for the original rigged character.
-# Source: britdawgmasterfunk, CC BY 4.0 (credit in docs).
-# No modifications to weapon, ADS, raycast, game ammo or imported geometry.
+# 65-bone Panzergrenadier, CC BY 4.0: docs/panzergrenadier-license.md.
+# v0.11 lightweight procedural movement and localized damage.
 const MODEL_1K: String = "res://assets/characters/panzergrenadier/panzergrenadier_1k.glb"
 const MODEL_2K: String = "res://assets/characters/panzergrenadier/panzergrenadier_2k.glb"
-const SOURCE_GLTF: String = "res://assets/characters/panzergrenadier/scene.gltf"
 const MODEL_SCALE: float = 0.019
 const FOOT_LIFT: float = 0.046
+const PATROL_LENGTH: float = 1.6
+const PATROL_SPEED: float = 0.7
+const DEATH_TIME: float = 2.6
 
-@export_range(1, 20, 1) var max_health: int = 3
+@export_range(1, 500, 1) var max_health: int = 100
 @export var high_quality: bool = false
-@onready var hitbox: CollisionShape3D = $CollisionShape3D
-@onready var locator: Label3D = get_node_or_null("DebugMarker") as Label3D
+@export var patrol_enabled: bool = true
+@export var show_debug_label: bool = false
 
-var health: int = 3
-var model: Node3D
+var health: int = 100
 var eliminated: bool = false
-var warning_layer: CanvasLayer
+var model: Node3D
+var rig: Skeleton3D
+var locator: Label3D
+var feedback: Label3D
+var feedback_left: float = 0.0
+var origin: Vector3
+var going_forward: bool = true
+var pause_patrol: float = 1.8
+var is_walking: bool = false
+var walk_phase: float = 0.0
+var flinch_left: float = 0.0
+var death_elapsed: float = 0.0
+var zones: Array[CollisionShape3D] = []
+var bones: Dictionary = {}
+var initial_rotations: Dictionary = {}
 
 func _ready() -> void:
-	_ensure_locator()
 	health = max_health
-	# A separate ZIP contains the 3D data; the GitHub PR has only code.
-	# Accept either 1K/2K variant, whichever has actually been extracted.
-	var paths: PackedStringArray
-	if high_quality:
-		paths = PackedStringArray([MODEL_2K, MODEL_1K, SOURCE_GLTF])
-	else:
-		paths = PackedStringArray([MODEL_1K, MODEL_2K, SOURCE_GLTF])
-	var chosen_path: String = ""
-	for candidate in paths:
-		if ResourceLoader.exists(candidate):
-			chosen_path = candidate
-			break
-	if chosen_path.is_empty():
-		var explanation: String = "Panzergrenadier asset absent or not imported.\nExpected: " + MODEL_1K + "\nUnpack ww2fps-v100-panzergrenadier-assets.zip at the project root and reopen Godot."
-		if FileAccess.file_exists(MODEL_1K) or FileAccess.file_exists(MODEL_2K):
-			explanation = "Panzergrenadier GLB exists but Godot has not imported it.\nClose editor, run Godot --headless --editor --path PROJECT --quit, then reopen."
-		_disable_enemy(explanation)
+	origin = global_position
+	# Parent capsule cannot intercept the seven precise raycast hitboxes.
+	collision_layer = 0
+	collision_mask = 0
+	for child in get_children():
+		if child is StaticBody3D:
+			var shape: CollisionShape3D = child.get_node_or_null("CollisionShape3D") as CollisionShape3D
+			if shape != null:
+				zones.append(shape)
+	_setup_labels()
+	var path: String = MODEL_2K if high_quality else MODEL_1K
+	if not ResourceLoader.exists(path):
+		path = MODEL_1K if high_quality else MODEL_2K
+	if not ResourceLoader.exists(path):
+		_model_error("Panzergrenadier 1K/2K GLB missing")
 		return
-
-	print("WW2 FPS enemy: loading ", chosen_path)
-	var packed: PackedScene = ResourceLoader.load(chosen_path) as PackedScene
+	var packed: PackedScene = ResourceLoader.load(path) as PackedScene
 	if packed == null:
-		_disable_enemy("GLB / glTF found, but did not import as PackedScene: " + chosen_path)
+		_model_error("GLB failed import: " + path)
 		return
-	var imported: Node3D = packed.instantiate() as Node3D
-	if imported == null:
-		_disable_enemy("Soldier packed scene did not instantiate as Node3D: " + chosen_path)
+	model = packed.instantiate() as Node3D
+	if model == null:
+		_model_error("GLB did not instantiate: " + path)
 		return
-	imported.name = "PanzergrenadierVisual"
-	add_child(imported)
-	imported.scale = Vector3.ONE * MODEL_SCALE
-	imported.position.y = FOOT_LIFT
-	model = imported
-
-	# Skeleton is important for future animations, but lack of a named rig
-	# must not silently hide a visual model that was loaded successfully.
-	var meshes: Array[Node] = imported.find_children("*", "MeshInstance3D", true, false)
+	model.name = "PanzergrenadierVisual"
+	add_child(model)
+	model.scale = Vector3.ONE * MODEL_SCALE
+	model.position.y = FOOT_LIFT
+	var meshes: Array[Node] = model.find_children("*", "MeshInstance3D", true, false)
 	if meshes.is_empty():
-		_disable_enemy("Model loaded, but no MeshInstance3D found: " + chosen_path)
+		_model_error("No renderable meshes: " + path)
 		return
-	var rigs: Array[Node] = imported.find_children("*", "Skeleton3D", true, false)
-	var bone_count: int = 0
-	if not rigs.is_empty() and rigs[0] is Skeleton3D:
-		bone_count = (rigs[0] as Skeleton3D).get_bone_count()
-	if bone_count < 60:
-		push_warning("WW2 FPS enemy: rig has %d bones; render kept visible for inspection." % bone_count)
-	locator.visible = true
-	print("WW2 FPS enemy READY: visual meshes=%d bones=%d HP=%d model=%s position=%s" % [
-		meshes.size(), bone_count, health, chosen_path, str(global_position)
+	var skeletons: Array[Node] = model.find_children("*", "Skeleton3D", true, false)
+	if not skeletons.is_empty():
+		rig = skeletons[0] as Skeleton3D
+		_prepare_bone_tracks()
+	else:
+		push_warning("WW2 FPS enemy: no rig found; patrol works without bone animation.")
+	locator.visible = show_debug_label
+	print("WW2 FPS enemy READY: meshes=%d bones=%d HP=%d zones=%d model=%s" % [
+		meshes.size(), rig.get_bone_count() if rig != null else 0, health, zones.size(), path
 	])
 
-func _ensure_locator() -> void:
-	# Scenes edited locally may not include the v0.10.1 diagnostic label.
-	# Never let an optional debugging node abort enemy model initialization.
-	if locator != null and is_instance_valid(locator):
+func _prepare_bone_tracks() -> void:
+	if rig == null:
 		return
-	locator = Label3D.new()
-	locator.name = "DebugMarker"
-	locator.position = Vector3(0.0, 2.17, 0.0)
-	locator.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	locator.pixel_size = 0.0038
-	locator.text = "SOLDADO TESTE"
-	locator.modulate = Color(1.0, 0.92, 0.44, 1.0)
-	add_child(locator)
-	push_warning("WW2 FPS enemy: DebugMarker was absent; created runtime locator.")
+	var expected: PackedStringArray = PackedStringArray([
+		"Spine", "Spine1", "Spine2", "Head", "LeftUpLeg", "RightUpLeg",
+		"LeftLeg", "RightLeg", "LeftArm", "RightArm"
+	])
+	for name in expected:
+		for index in range(rig.get_bone_count()):
+			var stem: String = rig.get_bone_name(index).split(":")[-1].split("_")[0]
+			if stem == name:
+				bones[name] = index
+				initial_rotations[index] = rig.get_bone_pose_rotation(index)
+				break
+	print("WW2 FPS enemy: animation bones mapped=", bones.size())
 
-func take_damage(amount: int) -> void:
-	if eliminated or amount <= 0:
+func _physics_process(delta: float) -> void:
+	is_walking = false
+	if eliminated or model == null or not patrol_enabled or flinch_left > 0.0:
+		return
+	if pause_patrol > 0.0:
+		pause_patrol = maxf(0.0, pause_patrol - delta)
+		return
+	var destination: Vector3 = origin + Vector3(0, 0, -PATROL_LENGTH) if going_forward else origin
+	var offset: Vector3 = destination - global_position
+	offset.y = 0.0
+	if offset.length() < 0.04:
+		going_forward = not going_forward
+		pause_patrol = 1.3
+		return
+	var direction: Vector3 = offset.normalized()
+	rotation.y = lerp_angle(rotation.y, atan2(-direction.x, -direction.z), minf(1.0, delta * 3.0))
+	global_position = global_position.move_toward(destination, PATROL_SPEED * delta)
+	is_walking = true
+
+func _process(delta: float) -> void:
+	if model == null:
+		return
+	if eliminated:
+		death_elapsed += delta
+		var t: float = clampf(death_elapsed / 0.85, 0.0, 1.0)
+		rotation.z = -1.25 * t * t * (3.0 - 2.0 * t)
+		if death_elapsed > DEATH_TIME:
+			queue_free()
+		return
+	flinch_left = maxf(0.0, flinch_left - delta)
+	walk_phase += delta * (8.0 if is_walking else 1.8)
+	model.position.y = FOOT_LIFT + (absf(sinf(walk_phase)) * 0.012 if is_walking else sinf(walk_phase) * 0.003)
+	_update_bone_pose()
+	if feedback_left > 0.0:
+		feedback_left = maxf(0.0, feedback_left - delta)
+		feedback.position.y += delta * 0.20
+		var color: Color = feedback.modulate
+		color.a = minf(1.0, feedback_left * 2.5)
+		feedback.modulate = color
+		if feedback_left <= 0.0:
+			feedback.visible = false
+
+func _update_bone_pose() -> void:
+	if rig == null:
+		return
+	var gait: float = sinf(walk_phase)
+	var walk_factor: float = 1.0 if is_walking else 0.0
+	var flinch: float = flinch_left / 0.35
+	_pose("LeftUpLeg", Vector3.RIGHT, gait * 0.38 * walk_factor)
+	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor)
+	_pose("LeftLeg", Vector3.RIGHT, maxf(0.0, -gait) * 0.24 * walk_factor)
+	_pose("RightLeg", Vector3.RIGHT, maxf(0.0, gait) * 0.24 * walk_factor)
+	_pose("LeftArm", Vector3.RIGHT, -gait * 0.20 * walk_factor)
+	_pose("RightArm", Vector3.RIGHT, gait * 0.20 * walk_factor)
+	_pose("Spine", Vector3.RIGHT, sinf(walk_phase * 0.6) * 0.015 - flinch * 0.13)
+	_pose("Spine1", Vector3.FORWARD, sinf(walk_phase * 0.5) * 0.01)
+	_pose("Spine2", Vector3.RIGHT, -flinch * 0.06)
+	_pose("Head", Vector3.UP, sinf(walk_phase * 0.4) * 0.025)
+
+func _pose(name: String, axis: Vector3, angle: float) -> void:
+	if not bones.has(name):
+		return
+	var index: int = bones[name]
+	var baseline: Quaternion = initial_rotations[index]
+	rig.set_bone_pose_rotation(index, baseline * Quaternion(axis, angle))
+
+func receive_zone_damage(amount: int, region: String) -> void:
+	if eliminated or model == null or amount <= 0:
 		return
 	health = maxi(0, health - amount)
-	if health == 0:
+	flinch_left = 0.35
+	_show_damage(amount, region)
+	print("WW2 FPS enemy HIT: %s damage=%d HP=%d/%d" % [region, amount, health, max_health])
+	if health <= 0:
 		_die()
+
+func take_damage(amount: int) -> void:
+	# Backward-compatible generic damage if caller holds the enemy root.
+	receive_zone_damage(amount * 40, "Torax")
 
 func _die() -> void:
 	eliminated = true
-	hitbox.set_deferred("disabled", true)
-	queue_free()
+	is_walking = false
+	for shape in zones:
+		if is_instance_valid(shape):
+			shape.set_deferred("disabled", true)
+	print("WW2 FPS enemy ELIMINATED")
 
-func _disable_enemy(message: String) -> void:
-	push_error("WW2 FPS enemy disabled: " + message)
-	hitbox.set_deferred("disabled", true)
-	locator.visible = false
-	if model != null and is_instance_valid(model):
-		model.visible = false
-	# This remains on screen until the user installs/imports the asset.
-	# Explicit diagnostic rather than silently hiding the soldier.
-	warning_layer = CanvasLayer.new()
-	warning_layer.name = "EnemyAssetErrorHUD"
-	warning_layer.layer = 8
-	add_child(warning_layer)
-	var notice: Label = Label.new()
-	notice.name = "MissingPanzergrenadierWarning"
-	notice.text = "SOLDADO NAO CARREGADO - ASSET AUSENTE OU SEM IMPORTACAO\nConsulte Output/Debugger e instale o ZIP do Panzergrenadier."
-	notice.add_theme_color_override("font_color", Color(1.0, 0.36, 0.22, 1.0))
-	notice.add_theme_font_size_override("font_size", 15)
-	notice.position = Vector2(18.0, 50.0)
-	notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	warning_layer.add_child(notice)
+func _setup_labels() -> void:
+	locator = get_node_or_null("DebugMarker") as Label3D
+	if locator == null:
+		locator = Label3D.new()
+		locator.name = "DebugMarker"
+		locator.text = "SOLDADO TESTE"
+		locator.position = Vector3(0, 2.17, 0)
+		locator.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		locator.pixel_size = 0.0038
+		add_child(locator)
+	locator.visible = show_debug_label
+	feedback = Label3D.new()
+	feedback.name = "DamageIndicator"
+	feedback.position = Vector3(0, 2.08, 0)
+	feedback.pixel_size = 0.004
+	feedback.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	feedback.no_depth_test = true
+	feedback.visible = false
+	add_child(feedback)
+
+func _show_damage(amount: int, region: String) -> void:
+	feedback.text = "%s -%d" % [region.to_upper(), amount]
+	feedback.position = Vector3(0, 2.08, 0)
+	feedback.modulate = Color(1.0, 0.28, 0.20) if region == "Cabeca" else Color(1.0, 0.90, 0.32)
+	feedback.visible = true
+	feedback_left = 0.75
+
+func _model_error(why: String) -> void:
+	push_error("WW2 FPS enemy DISABLED: " + why)
+	for shape in zones:
+		if is_instance_valid(shape):
+			shape.set_deferred("disabled", true)
+	locator.visible = true
+	locator.text = "SOLDADO SEM MODELO"

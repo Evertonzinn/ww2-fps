@@ -1,23 +1,96 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://enemy_soldier.gd" id="1_enemy"]
+[ext_resource type="Script" path="res://enemy_hit_zone.gd" id="2_zone"]
 
 [sub_resource type="CapsuleShape3D" id="EnemyCapsule"]
 radius = 0.33
-height = 1.80
+height = 1.8
 
-[node name="EnemySoldier" type="StaticBody3D"]
+[sub_resource type="SphereShape3D" id="HeadShape"]
+radius = 0.17
+
+[sub_resource type="BoxShape3D" id="TorsoShape"]
+size = Vector3(0.49, 0.55, 0.32)
+
+[sub_resource type="BoxShape3D" id="AbdomenShape"]
+size = Vector3(0.44, 0.23, 0.30)
+
+[sub_resource type="BoxShape3D" id="ArmShape"]
+size = Vector3(0.20, 0.49, 0.28)
+
+[sub_resource type="BoxShape3D" id="LegShape"]
+size = Vector3(0.23, 0.72, 0.30)
+
+[node name="EnemySoldier" type="AnimatableBody3D"]
+collision_layer = 0
+collision_mask = 0
 script = ExtResource("1_enemy")
 
+# Original capsule is excluded from raycasts; zonal children do the collision.
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-position = Vector3(0, 0.90, 0)
+position = Vector3(0, 0.9, 0)
 shape = SubResource("EnemyCapsule")
 
-# Debug-only locator: visible above a successfully imported soldier.
-# If locator is absent, verify branch and main scene instancing.
-[node name="DebugMarker" type="Label3D" parent="."]
-position = Vector3(0, 2.17, 0)
-billboard = 1
-pixel_size = 0.0038
-text = "SOLDADO TESTE"
-modulate = Color(1, 0.92, 0.44, 1)
+[node name="HeadHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Cabeca"
+damage_per_hit = 100
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HeadHitbox"]
+position = Vector3(0, 1.66, 0)
+shape = SubResource("HeadShape")
+
+[node name="TorsoHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Torax"
+damage_per_hit = 40
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TorsoHitbox"]
+position = Vector3(0, 1.27, 0)
+shape = SubResource("TorsoShape")
+
+[node name="AbdomenHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Abdomen"
+damage_per_hit = 25
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="AbdomenHitbox"]
+position = Vector3(0, 0.88, 0)
+shape = SubResource("AbdomenShape")
+
+[node name="LeftArmHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Braco"
+damage_per_hit = 15
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LeftArmHitbox"]
+position = Vector3(-0.34, 1.22, 0)
+shape = SubResource("ArmShape")
+
+[node name="RightArmHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Braco"
+damage_per_hit = 15
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RightArmHitbox"]
+position = Vector3(0.34, 1.22, 0)
+shape = SubResource("ArmShape")
+
+[node name="LeftLegHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Perna"
+damage_per_hit = 20
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LeftLegHitbox"]
+position = Vector3(-0.135, 0.40, 0)
+shape = SubResource("LegShape")
+
+[node name="RightLegHitbox" type="StaticBody3D" parent="."]
+script = ExtResource("2_zone")
+region = "Perna"
+damage_per_hit = 20
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RightLegHitbox"]
+position = Vector3(0.135, 0.40, 0)
+shape = SubResource("LegShape")

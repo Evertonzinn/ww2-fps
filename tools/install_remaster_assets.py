@@ -129,15 +129,18 @@ def install_one(archive_path: Path, dest: Path, max_side: int, image_lib) -> dic
         for source in list(temp.rglob("*")):
             if not source.is_file() or source.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
                 continue
-            output = source.with_name(source.name + ".optimized")
+            output = source.with_name(source.stem + ".ww2_tmp" + source.suffix)
             texture_info[source.relative_to(temp).as_posix()] = optimize_texture(
-                source, output.with_suffix(source.suffix), max_side, image_lib)
-            source.unlink()
-            output.with_suffix(source.suffix).rename(source)
+                source, output, max_side, image_lib)
+            output.replace(source)
         details["textures"] = texture_info
         details["license"] = "CC BY 4.0"
         details["source_file"] = archive_path.name
-        details["sha256_zip"] = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with archive_path.open("rb") as original_zip:
+            for chunk in iter(lambda: original_zip.read(1024 * 1024), b""):
+                digest.update(chunk)
+        details["sha256_zip"] = digest.hexdigest()
         # Place only *validated*, complete packages. Never overwrite the
         # existing verified installation until the replacement is ready.
         old = dest.with_name(dest.name + ".previous")

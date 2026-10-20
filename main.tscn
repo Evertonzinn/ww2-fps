@@ -6,7 +6,6 @@
 [ext_resource type="Script" path="res://world_props.gd" id="4_world"]
 [ext_resource type="Script" path="res://hud.gd" id="5_hud"]
 [ext_resource type="Script" path="res://graphics_menu.gd" id="6_graphics"]
-[ext_resource type="PackedScene" path="res://enemy_soldier.tscn" id="7_enemy"]
 
 [sub_resource type="BoxMesh" id="GroundMesh"]
 size = Vector3(40, 1, 40)
@@ -185,12 +184,6 @@ material_override = SubResource("TargetMaterial")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="TargetRight"]
 shape = SubResource("TargetShape")
-
-# First enemy appears near the initial player view, in the road and before red targets.
-# Temporary placement for asset/visibility diagnostics; no AI or weapon changes.
-[node name="EnemySoldierTest" parent="." instance=ExtResource("7_enemy")]
-position = Vector3(1.0, 0, -4.0)
-rotation = Vector3(0, 3.1415927, 0)
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("5_hud")

@@ -1,6 +1,7 @@
 extends Node3D
 
 const VillageProps = preload("res://environment/prop_builder.gd")
+const EnemySoldierScene = preload("res://enemy_soldier.tscn")
 
 # Vila de testes gerada em tempo de execucao: sem downloads, texturas ou assets externos.
 var stone: StandardMaterial3D
@@ -47,6 +48,25 @@ func _ready() -> void:
 	_tree("TreeWest", Vector3(-18.0, 0.0, 12.0))
 	_tree("TreeEast", Vector3(18.0, 0.0, -17.0))
 	VillageProps.populate(self, stone, timber, grass, brick)
+	# Defer instantiation until the World finishes its setup and child ready pass.
+	call_deferred("_spawn_initial_enemy")
+	print("WW2 FPS world: enemy spawn scheduled")
+
+func _spawn_initial_enemy() -> void:
+	# Idempotent: levels with an authored enemy won't create a duplicate.
+	var existing: Node3D = get_node_or_null("EnemySoldierTest") as Node3D
+	if existing != null:
+		print("WW2 FPS world: EnemySoldierTest already in tree at ", existing.global_position)
+		return
+	var soldier: Node3D = EnemySoldierScene.instantiate() as Node3D
+	if soldier == null:
+		push_error("WW2 FPS world: cannot instantiate res://enemy_soldier.tscn")
+		return
+	soldier.name = "EnemySoldierTest"
+	soldier.position = Vector3(1.0, 0.0, -4.0)
+	soldier.rotation.y = PI
+	add_child(soldier)
+	print("WW2 FPS world: EnemySoldierTest added to SceneTree at ", soldier.global_position)
 
 func _material(tint: Color) -> StandardMaterial3D:
 	var material: StandardMaterial3D = StandardMaterial3D.new()

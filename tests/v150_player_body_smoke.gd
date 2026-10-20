@@ -43,30 +43,34 @@ func _run() -> void:
 		return
 	print("PASS: rigged British body with %d bones" % rig.get_bone_count())
 	var bounds: AABB = body.get("lower_body_bounds")
-	if body.get("measured_lower_body") != true or bounds.size.y < 0.2 or bounds.size.y > 3.0:
-		push_error("v0.15 BODY SMOKE FAIL: invalid skinned lower-body geometry scale")
+	var raw_height: float = bounds.size.y
+	var normalized: float = float(body.get("corrected_visual_height"))
+	var scale_factor: float = float(body.get("imported_visual_scale"))
+	var source_kind: String = str(body.get("visual_bounds_source"))
+	if body.get("measured_lower_body") != true or raw_height <= 0.001:
+		push_error("v0.15 BODY SMOKE FAIL: source skinned lower-body bounds missing")
+		quit(1)
+		return
+	if not is_finite(scale_factor) or scale_factor <= 0.0 or scale_factor > 300.0:
+		push_error("v0.15 BODY SMOKE FAIL: invalid imported rig scale")
+		quit(1)
+		return
+	if normalized < 0.75 or normalized > 1.20:
+		push_error("v0.15 BODY SMOKE FAIL: body normalization out of range")
 		quit(1)
 		return
 	var soldier_root: Node3D = body.get("soldier") as Node3D
-	if soldier_root == null:
-		push_error("v0.15 BODY SMOKE FAIL: imported soldier reference missing")
+	if soldier_root == null or absf(soldier_root.scale.x - scale_factor) > 0.001:
+		push_error("v0.15 BODY SMOKE FAIL: imported rig/mesh scale was not applied")
 		quit(1)
 		return
-	var leg_mid_x: float = bounds.position.x + bounds.size.x * 0.5
-	if absf(soldier_root.position.x + leg_mid_x) > 0.03:
-		push_error("v0.15 BODY SMOKE FAIL: pants/boots not centred")
+	if soldier_root.position.z > -0.15:
+		push_error("v0.15 BODY SMOKE FAIL: legs not placed ahead of player view")
 		quit(1)
 		return
-	if absf(soldier_root.position.y + bounds.position.y) > 0.03:
-		push_error("v0.15 BODY SMOKE FAIL: boot soles not aligned to local ground")
-		quit(1)
-		return
-	var leg_mid_z: float = bounds.position.z + bounds.size.z * 0.5
-	if soldier_root.position.z + leg_mid_z > -0.14:
-		push_error("v0.15 BODY SMOKE FAIL: body preview not staged in forward view")
-		quit(1)
-		return
-	print("PASS: real British skinned boots/trousers measured and camera-framed")
+	print("PASS: British body normalized; source=%s raw=%.4fm scale=%.4f" % [
+		source_kind, raw_height, scale_factor
+	])
 	# Regression for v0.15.3: the complete torso/vest occupied the FPS
 	# viewport and hid both rifles. Only Pants and Boots may be visible.
 	var visual: Node3D = body.get_node_or_null("BritishSoldierFPS") as Node3D

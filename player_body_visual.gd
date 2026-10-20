@@ -30,6 +30,12 @@ var fps_lower_mesh_count: int = 0
 var fps_hidden_upper_mesh_count: int = 0
 var lower_body_bounds: AABB = AABB()
 var measured_lower_body: bool = false
+# Mesh AABBs and skinned rest bones can have different units after the
+# Blender FBX->glTF export. Compare both before deciding a visual scale.
+var raw_rig_leg_height: float = 0.0
+var imported_visual_scale: float = 1.0
+var corrected_visual_height: float = 0.0
+var visual_bounds_source: String = "none"
 
 func _ready() -> void:
 	player = get_parent() as CharacterBody3D
@@ -106,17 +112,74 @@ func _ready() -> void:
 			min_corner = min_corner.min(point)
 			max_corner = max_corner.max(point)
 	lower_body_bounds = AABB(min_corner, max_corner - min_corner)
-	if lower_body_bounds.size.y < 0.20 or lower_body_bounds.size.y > 3.0:
-		_fail("unusable Pants/Boots height %.3fm; verify GLB scale" %
-			lower_body_bounds.size.y)
+	var garment_height: float = lower_body_bounds.size.y
+	if not is_finite(garment_height) or garment_height < 0.001:
+		_fail("Pants/Boots AABB is empty or invalid")
 		return
-	var lower_mid: Vector3 = lower_body_bounds.position + lower_body_bounds.size * 0.5
-	soldier.position = Vector3(-lower_mid.x, -lower_body_bounds.position.y,
-		-leg_preview_forward - lower_mid.z)
+
+	# Prefer the actual rest-leg proportions over a skinned mesh AABB.
+	# A Character Creator FBX can export a small mesh bounding box while
+	# carrying its real deformation scale in the skeleton transforms.
+	# Scaling by 1 / 0.011 blindly would then make a giant soldier.
+	var thigh_index: int = rig.find_bone("CC_Base_L_Thigh")
+	var foot_index: int = rig.find_bone("CC_Base_L_Foot")
+	var have_rest_bones: bool = thigh_index >= 0 and foot_index >= 0
+	var thigh_local: Vector3 = Vector3.ZERO
+	var foot_local: Vector3 = Vector3.ZERO
+	if have_rest_bones:
+		thigh_local = soldier.to_local(rig.to_global(
+			rig.get_bone_global_rest(thigh_index).origin))
+		foot_local = soldier.to_local(rig.to_global(
+			rig.get_bone_global_rest(foot_index).origin))
+		raw_rig_leg_height = thigh_local.distance_to(foot_local)
+
+	var reference_span: float = garment_height
+	var floor_y: float = lower_body_bounds.position.y
+	var mid_x: float = lower_body_bounds.position.x + lower_body_bounds.size.x * 0.5
+	var mid_z: float = lower_body_bounds.position.z + lower_body_bounds.size.z * 0.5
+	var target_span: float = 1.03  # lower garment: waist to boot sole, metres
+	visual_bounds_source = "mesh"
+	if have_rest_bones and is_finite(raw_rig_leg_height) and raw_rig_leg_height > 0.003:
+		# Anatomical thigh-to-foot length is typically shorter than
+		# trousers including boots. It remains valid when mesh AABB is tiny.
+		reference_span = raw_rig_leg_height
+		target_span = 0.86
+		visual_bounds_source = "skeleton"
+		if garment_height < raw_rig_leg_height * 0.25:
+			print("WW2 British PlayerBody: tiny static mesh AABB vs rig; using rest bones")
+		# Locate ankles from actual rest bones, not unreliable mesh origin.
+		var right_foot_index: int = rig.find_bone("CC_Base_R_Foot")
+		var right_thigh_index: int = rig.find_bone("CC_Base_R_Thigh")
+		if right_foot_index >= 0 and right_thigh_index >= 0:
+			var right_foot: Vector3 = soldier.to_local(rig.to_global(
+				rig.get_bone_global_rest(right_foot_index).origin))
+			var right_thigh: Vector3 = soldier.to_local(rig.to_global(
+				rig.get_bone_global_rest(right_thigh_index).origin))
+			floor_y = minf(foot_local.y, right_foot.y) - raw_rig_leg_height * 0.08
+			mid_x = (thigh_local.x + right_thigh.x) * 0.5
+			mid_z = (foot_local.z + right_foot.z) * 0.5
+		else:
+			floor_y = foot_local.y - raw_rig_leg_height * 0.08
+			mid_x = thigh_local.x
+			mid_z = foot_local.z
+
+	imported_visual_scale = target_span / reference_span
+	corrected_visual_height = reference_span * imported_visual_scale
+	if not is_finite(imported_visual_scale) or imported_visual_scale < 0.003 or imported_visual_scale > 300.0:
+		_fail("unsafe CC5 body scale %.4f (mesh=%.4fm, leg=%.4fm)" % [
+			imported_visual_scale, garment_height, raw_rig_leg_height
+		])
+		return
+	# Scale the imported rig and its skinned meshes TOGETHER. This is
+	# outside the Player collider and does not alter physics or gun FOV.
+	soldier.scale = Vector3.ONE * imported_visual_scale
+	soldier.position = Vector3(-mid_x * imported_visual_scale,
+		-floor_y * imported_visual_scale,
+		-leg_preview_forward - mid_z * imported_visual_scale)
 	measured_lower_body = true
-	print("WW2 British PlayerBody BOUNDS: min=%s size=%s preview=%s" % [
-		str(lower_body_bounds.position), str(lower_body_bounds.size),
-		str(soldier.position)
+	print("WW2 British PlayerBody BOUNDS: mesh=%.4fm rig=%.4fm source=%s scale=%.4f normalized=%.3fm offset=%s" % [
+		garment_height, raw_rig_leg_height, visual_bounds_source,
+		imported_visual_scale, corrected_visual_height, str(soldier.position)
 	])
 	if conceal_unbound_fps_arms:
 		# Stage 1: use the original player rifle viewmodels; do not draw

@@ -9,8 +9,13 @@ func _test() -> void:
 	if change_scene_to_file("res://main.tscn") != OK:
 		_fail("main.tscn failed to load")
 		return
-	for index in range(20):
+	# Rendering and physics loops are independent in headless mode.
+	# Wait for deferred World enemy spawn and Jolt collider registration.
+	for index in range(4):
 		await process_frame
+	for index in range(4):
+		await physics_frame
+	await process_frame
 	var world: Node3D = current_scene as Node3D
 	var player: CharacterBody3D = world.get_node_or_null("Player") as CharacterBody3D
 	if player == null:
@@ -23,10 +28,18 @@ func _test() -> void:
 	if posture == null or standing == null or prone == null or head == null:
 		_fail("stance controller or colliders missing")
 		return
-	if not bool(posture.call("is_standing")) or prone.disabled:
-		_fail("initial standing stance invalid")
+	# Initial stance is STAND: upright enabled, horizontal prone disabled.
+	# v0.14 erroneously FAILED when prone.disabled == true (expected).
+	if not bool(posture.call("is_standing")) or standing.disabled or not prone.disabled:
+		_fail("invalid startup colliders: stance=%d upright_disabled=%s prone_disabled=%s" % [
+			int(posture.get("stance")), str(standing.disabled), str(prone.disabled)
+		])
 		return
-	print("PASS: initial stance standing; prone collider disabled")
+	var standing_shape: CapsuleShape3D = standing.shape as CapsuleShape3D
+	if standing_shape == null or absf(standing_shape.height - 1.8) > 0.01:
+		_fail("initial upright shape is not a 1.8m capsule")
+		return
+	print("PASS: initial stance standing; upright enabled and prone disabled")
 
 	var key_c: InputEventKey = InputEventKey.new()
 	key_c.physical_keycode = KEY_C
@@ -35,7 +48,13 @@ func _test() -> void:
 		_fail("C key was ignored")
 		return
 	if int(posture.get("stance")) != 1 or standing.disabled or not prone.disabled:
-		_fail("C did not activate crouching collision")
+		_fail("C did not activate crouching collision (stance=%d upright_disabled=%s prone_disabled=%s)" % [
+			int(posture.get("stance")), str(standing.disabled), str(prone.disabled)
+		])
+		return
+	var crouch_shape: CapsuleShape3D = standing.shape as CapsuleShape3D
+	if crouch_shape == null or absf(crouch_shape.height - 1.26) > 0.01:
+		_fail("C did not activate 1.26m crouching capsule")
 		return
 	if absf(float(posture.call("movement_speed", true, 5.0, 8.0)) - 2.05) > 0.01:
 		_fail("crouch incorrectly allows sprint")
@@ -49,7 +68,9 @@ func _test() -> void:
 		_fail("Ctrl key was ignored")
 		return
 	if int(posture.get("stance")) != 2 or not standing.disabled or prone.disabled:
-		_fail("Ctrl did not enable horizontal prone collider")
+		_fail("Ctrl did not enable prone collision (stance=%d upright_disabled=%s prone_disabled=%s)" % [
+			int(posture.get("stance")), str(standing.disabled), str(prone.disabled)
+		])
 		return
 	if absf(float(posture.call("movement_speed", true, 5.0, 8.0)) - 0.9) > 0.01:
 		_fail("prone speed incorrect")
@@ -102,7 +123,11 @@ func _test() -> void:
 	enemy.set("alert", false)
 	enemy.set("sees_player", false)
 	enemy.set("sight_time", 100.0)
-	var position: Vector3 = player.global_position
+	var enemy_body: Node3D = world.get_node_or_null("EnemySoldierTest") as Node3D
+	var separation: float = player.global_position.distance_to(enemy_body.global_position)
+	if separation <= 0.75 or separation >= 30.0:
+		_fail("footstep test requires 0.75m < enemy distance < 30m; actual %.2fm" % separation)
+		return
 	player.call("report_footstep", 0.75)
 	if bool(enemy.get("alert")):
 		_fail("extremely quiet footstep alerted distant enemy")

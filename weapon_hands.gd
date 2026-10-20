@@ -41,6 +41,21 @@ var hands_initialized: bool = false
 var active_quality: int = 0
 var reach_limited_frames: int = 0
 
+# Godot 4's SkeletonModifier3D runs in deferred skeleton processing.
+# get_bone_global_pose() in the test's process_frame sees PRE-MODIFIER
+# poses. Sample actual solved joints while modification_processed fires.
+var ik_modifier_samples: int = 0
+var ik_right_error: float = INF
+var ik_left_error: float = INF
+var ik_right_wrist_world: Vector3 = Vector3.ZERO
+var ik_left_wrist_world: Vector3 = Vector3.ZERO
+var ik_sample_weapon_slot: int = 1
+var pose_safe: bool = false
+var bad_pose_samples: int = 0
+var invalid_pose_reported: bool = false
+const MAX_FINAL_GRIP_ERROR: float = 0.10
+const BAD_POSE_GRACE_FRAMES: int = 4
+
 func _ready() -> void:
 	weapon = get_parent()
 	# The weapon script preloads this file. Keep this reference dynamic to
@@ -133,6 +148,11 @@ func set_texture_quality(high: bool) -> bool:
 	current_left = _target_left()
 	right_target.position = _limited(current_right, right_chain)
 	left_target.position = _limited(current_left, left_chain)
+	# The left modifier was appended after the right: when its signal
+	# fires, both arm chains have been modified on the SAME frame.
+	# Do not sample after process_frame (the engine can restore the
+	# pre-modifier pose before ordinary GDScript processing resumes).
+	left_ik.modification_processed.connect(_on_final_ik_pose)
 	right_ik.start()
 	left_ik.start()
 	if not right_ik.is_running() or not left_ik.is_running():
@@ -144,6 +164,38 @@ func set_texture_quality(high: bool) -> bool:
 		skeleton.get_bone_count(), meshes.size(), active_quality
 	])
 	return true
+
+func _on_final_ik_pose() -> void:
+	if skeleton == null or right_chain.size() != 3 or left_chain.size() != 3:
+		return
+	# This callback runs during SkeletonModifier3D.modification_processed:
+	# ONLY now are the modified bone poses authoritative in Godot 4.
+	ik_right_wrist_world = skeleton.to_global(
+		skeleton.get_bone_global_pose(right_chain[2]).origin)
+	ik_left_wrist_world = skeleton.to_global(
+		skeleton.get_bone_global_pose(left_chain[2]).origin)
+	ik_right_error = ik_right_wrist_world.distance_to(right_target.global_position)
+	ik_left_error = ik_left_wrist_world.distance_to(left_target.global_position)
+	ik_sample_weapon_slot = 2 if weapon.sniper_equipped else 1
+	ik_modifier_samples += 1
+	var valid_sample: bool = (
+		ik_right_wrist_world.is_finite() and ik_left_wrist_world.is_finite() and
+		is_finite(ik_right_error) and is_finite(ik_left_error) and
+		ik_right_error <= MAX_FINAL_GRIP_ERROR and
+		ik_left_error <= MAX_FINAL_GRIP_ERROR)
+	if valid_sample:
+		pose_safe = true
+		bad_pose_samples = 0
+		invalid_pose_reported = false
+	else:
+		bad_pose_samples += 1
+		if bad_pose_samples >= BAD_POSE_GRACE_FRAMES:
+			pose_safe = false
+			if not invalid_pose_reported:
+				invalid_pose_reported = true
+				push_warning("WW2 FPS HANDS POSE UNSAFE: slot=%d right=%.3fm left=%.3fm; hiding floating arms" % [
+					ik_sample_weapon_slot, ik_right_error, ik_left_error
+				])
 
 func _ik_paths_resolve() -> bool:
 	return right_ik != null and left_ik != null and (
@@ -161,6 +213,15 @@ func _disable_invalid_rig(reason: String) -> void:
 		model_root.visible = false
 
 func _shutdown_ik() -> void:
+	# On quality changes, old modifier signals must not leave a
+	# previous pose sample masquerading as a solved new rig.
+	ik_modifier_samples = 0
+	ik_right_error = INF
+	ik_left_error = INF
+	ik_sample_weapon_slot = 1
+	pose_safe = false
+	bad_pose_samples = 0
+	invalid_pose_reported = false
 	if right_ik != null and is_instance_valid(right_ik):
 		right_ik.stop()
 	if left_ik != null and is_instance_valid(left_ik):
@@ -262,9 +323,13 @@ func _process(delta: float) -> void:
 	var scope_shown: bool = sniper and weapon.sniper_view != null and (
 		weapon.sniper_view.scope_layer != null and weapon.sniper_view.scope_layer.visible)
 	# Never draw forearms in front of the telescope's scope overlay.
-	model_root.visible = not scope_shown
-	if not model_root.visible:
-		return
+	# Never display detached/T-pose arms until BOTH IK chains are
+	# confirmed close to the grips by the FINAL modifier output.
+	# Missing or unsafe pose must not cover rifle, scope or HUD.
+	model_root.visible = not scope_shown and pose_safe
+	# Update IK targets even when the model is hidden: the pose
+	# must be allowed to converge and recover without toggling.
+	# Scope visibility alone does not control the solver.
 	var target_shoulder: Vector3 = SNIPER_SHOULDERS if sniper else LEE_SHOULDERS
 	model_root.position = model_root.position.lerp(
 		target_shoulder - resting_shoulder_mid,

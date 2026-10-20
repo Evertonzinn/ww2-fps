@@ -52,16 +52,22 @@ func _run() -> void:
 		return
 	print("PASS: two IK targets resolve from their OWN nodes and solvers are running")
 	print("PASS: rigged skinned hands (bones=%d)" % hands.skeleton.get_bone_count())
-	# Merely constructing IK targets was a false-positive risk in older
-	# prototypes. The actual wrist joints must converge to rifle targets.
+	# SkeletonModifier3D runs DEFERRED: querying get_bone_global_pose()
+	# after await process_frame reads the restored PRE-IK pose in Godot 4.
+	# The rig now records real wrist positions IN the final IK modifier
+	# signal, after both chains have run.
 	for frame in range(8):
 		await process_frame
-	var lee_right_error: float = _wrist_error(hands, hands.right_chain,
-		hands.right_target.position)
-	var lee_left_error: float = _wrist_error(hands, hands.left_chain,
-		hands.left_target.position)
-	print("WW2 FPS HANDS GRIP: Lee right=%.3fm left=%.3fm" % [
-		lee_right_error, lee_left_error
+	if hands.ik_modifier_samples < 2:
+		_fail("IK modifiers never processed: samples=%d" % hands.ik_modifier_samples)
+		return
+	if hands.ik_sample_weapon_slot != 1:
+		_fail("IK final sample belongs to wrong weapon")
+		return
+	var lee_right_error: float = hands.ik_right_error
+	var lee_left_error: float = hands.ik_left_error
+	print("WW2 FPS HANDS FINAL IK: Lee right=%.3fm left=%.3fm samples=%d" % [
+		lee_right_error, lee_left_error, hands.ik_modifier_samples
 	])
 	var lee_right_clamp: float = hands.right_target.position.distance_to(hands._target_right())
 	var lee_left_clamp: float = hands.left_target.position.distance_to(hands._target_left())
@@ -100,14 +106,19 @@ func _run() -> void:
 	if not hands.current_right.is_finite() or not hands.current_left.is_finite():
 		_fail("sniper hand pose is non-finite")
 		return
+	var previous_modifier_samples: int = hands.ik_modifier_samples
 	for frame in range(8):
 		await process_frame
-	var sniper_right_error: float = _wrist_error(hands, hands.right_chain,
-		hands.right_target.position)
-	var sniper_left_error: float = _wrist_error(hands, hands.left_chain,
-		hands.left_target.position)
-	print("WW2 FPS HANDS GRIP: sniper right=%.3fm left=%.3fm" % [
-		sniper_right_error, sniper_left_error
+	if hands.ik_modifier_samples <= previous_modifier_samples:
+		_fail("sniper IK modifiers did not process new frames")
+		return
+	if hands.ik_sample_weapon_slot != 2:
+		_fail("IK final sample still corresponds to Lee-Enfield")
+		return
+	var sniper_right_error: float = hands.ik_right_error
+	var sniper_left_error: float = hands.ik_left_error
+	print("WW2 FPS HANDS FINAL IK: sniper right=%.3fm left=%.3fm samples=%d" % [
+		sniper_right_error, sniper_left_error, hands.ik_modifier_samples
 	])
 	if not is_finite(sniper_right_error) or not is_finite(sniper_left_error):
 		_fail("sniper IK produced non-finite wrist positions")
@@ -135,10 +146,5 @@ func _fail(reason: String) -> void:
 	push_error("WW2 FPS v0.16 RIGGED HANDS SMOKE: FAIL — " + reason)
 	quit(1)
 
-func _wrist_error(hands: FirstPersonWeaponHands, chain: Array[int],
-		target: Vector3) -> float:
-	if chain.size() != 3 or hands.skeleton == null:
-		return INF
-	var wrist_local: Vector3 = hands.to_local(hands.skeleton.to_global(
-		hands.skeleton.get_bone_global_pose(chain[2]).origin))
-	return wrist_local.distance_to(target)
+# Wrist measurements are supplied exclusively by SkeletonModifier3D's
+# modification_processed callback, not ordinary SceneTree frame loops.

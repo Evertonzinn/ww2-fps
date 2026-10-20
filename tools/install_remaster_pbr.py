@@ -38,7 +38,8 @@ def _safe_url(url: str) -> str:
     return url
 
 def _json(url: str) -> object:
-    with urllib.request.urlopen(url, timeout=30) as r:
+    request = urllib.request.Request(url, headers={"User-Agent": "WW2FPS-Remaster/0.20"})
+    with urllib.request.urlopen(request, timeout=30) as r:
         return json.load(r)
 
 def _leaf_urls(obj: object, trail: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], str]]:

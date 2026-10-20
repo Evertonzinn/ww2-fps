@@ -49,7 +49,7 @@ func _make_player_hud() -> void:
 	stance_readout.position = Vector2(12.0, 70.0)
 	stance_readout.add_theme_color_override("font_color", Color(0.78, 0.91, 0.79))
 	stance_readout.add_theme_font_size_override("font_size", 15)
-	stance_readout.text = "EM PE  |  SHIFT PARA CORRER"
+	stance_readout.text = "EM PE"
 	add_child(stance_readout)
 
 	damage_overlay = ColorRect.new()
@@ -110,6 +110,6 @@ func show_player_death() -> void:
 	damage_overlay.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
-func show_player_stance(posture: String, movement_note: String) -> void:
+func show_player_stance(posture: String, _movement_note: String) -> void:
 	if stance_readout != null:
-		stance_readout.text = posture + "  |  " + movement_note
+		stance_readout.text = posture

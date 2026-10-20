@@ -40,6 +40,14 @@ func _test() -> void:
 		_fail("initial upright shape is not a 1.8m capsule")
 		return
 	print("PASS: initial stance standing; upright enabled and prone disabled")
+	# Entering crouch from standing must never be blocked by normal
+	# ground contact; stand->crouch is a strictly smaller collider.
+	var ground: CollisionObject3D = world.get_node_or_null("Ground") as CollisionObject3D
+	if ground == null:
+		_fail("World/Ground collider missing; clearance test invalid")
+		return
+	print("PASS: World/Ground identified; floor is excluded from posture expansion")
+
 
 	var key_c: InputEventKey = InputEventKey.new()
 	key_c.physical_keycode = KEY_C

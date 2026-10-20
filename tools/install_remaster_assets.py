@@ -32,6 +32,11 @@ ASSETS = {
     "fps_hands_rigged_by_evolvegames.zip": "characters/fps_hands_reference",
     "animated_fps_hands_rifle_animation_pack.zip": "characters/animated_fps_hands_reference",
 }
+RUNTIME_ASSETS = frozenset({
+    "stone_house.zip", "french_house_ww2.zip", "realistic_tree.zip",
+    "realistic_tree_models_for_games.zip",
+    "kar98k_mauser_karabiner_98k_bolt_action_rifle.zip",
+})
 MAX_ZIP_MEMBERS = 300
 MAX_GLTF_METADATA_BYTES = 32 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
@@ -179,6 +184,8 @@ def main() -> int:
     parser.add_argument("--texture-size", type=int, choices=(512, 1024, 2048),
                         default=1024)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--runtime-only", action="store_true",
+                        help="install only 2 houses, 2 trees and Kar98k; skip reference meshes")
     args = parser.parse_args()
     try:
         import PIL
@@ -191,6 +198,8 @@ def main() -> int:
     manifest = {}
     installed = 0
     for archive_name, relative in ASSETS.items():
+        if args.runtime_only and archive_name not in RUNTIME_ASSETS:
+            continue
         archive_path = args.archives / archive_name
         if not archive_path.is_file():
             print("SKIP: %s not supplied" % archive_name)

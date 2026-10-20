@@ -12,3 +12,7 @@
 
 # Licensed third-party BAMEN FPS rigged hands installed locally from separate ZIP.
 /assets/characters/bamen_fps_arms/*.glb
+
+# Poly Haven CC0 1K material downloads installed locally by tool.
+/assets/environment/remaster/textures/*.jpg
+/assets/environment/remaster/textures/*.png

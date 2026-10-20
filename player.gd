@@ -6,14 +6,45 @@ const JUMP_SPEED: float = 4.5
 const GRAVITY: float = 9.8
 const MOUSE_SENSITIVITY: float = 0.002
 
+@export_range(1, 500, 1) var max_health: int = 100
+var health: int = 100
+var is_dead: bool = false
+
 @onready var head: Node3D = $Head
 @onready var weapon: WeaponController = $Head/Camera3D/Weapon
 @onready var graphics_menu: GraphicsSettingsMenu = $"../GraphicsMenu"
 
 func _ready() -> void:
+	health = max_health
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	call_deferred("_update_health_hud")
+
+func _update_health_hud() -> void:
+	var ui: Node = get_tree().current_scene.get_node_or_null("HUD")
+	if ui != null:
+		ui.call("show_player_health", health, max_health)
+
+func take_damage(amount: int) -> void:
+	if is_dead or amount <= 0:
+		return
+	health = maxi(0, health - amount)
+	_update_health_hud()
+	var ui: Node = get_tree().current_scene.get_node_or_null("HUD")
+	if ui != null:
+		ui.call("show_player_damage", amount)
+	if health == 0:
+		is_dead = true
+		velocity = Vector3.ZERO
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		if ui != null:
+			ui.call("show_player_death")
+		print("WW2 FPS player ELIMINATED")
 
 func _unhandled_input(event: InputEvent) -> void:
+	if is_dead:
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ENTER:
+			get_tree().reload_current_scene()
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
 		head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
@@ -40,6 +71,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	if is_dead:
+		velocity = Vector3.ZERO
+		return
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
 	elif Input.is_key_pressed(KEY_SPACE):

@@ -4,6 +4,7 @@ extends AnimatableBody3D
 # v0.11 lightweight procedural movement and localized damage.
 const MODEL_1K: String = "res://assets/characters/panzergrenadier/panzergrenadier_1k.glb"
 const MODEL_2K: String = "res://assets/characters/panzergrenadier/panzergrenadier_2k.glb"
+const CombatScript = preload("res://enemy_combat.gd")
 const MODEL_SCALE: float = 0.019
 const FOOT_LIFT: float = 0.046
 const PATROL_LENGTH: float = 1.6
@@ -19,6 +20,7 @@ var health: int = 100
 var eliminated: bool = false
 var model: Node3D
 var rig: Skeleton3D
+var combat: Node3D
 var locator: Label3D
 var feedback: Label3D
 var feedback_left: float = 0.0
@@ -74,6 +76,9 @@ func _ready() -> void:
 	else:
 		push_warning("WW2 FPS enemy: no rig found; patrol works without bone animation.")
 	locator.visible = show_debug_label
+	combat = CombatScript.new() as Node3D
+	combat.name = "EnemyCombat"
+	add_child(combat)
 	print("WW2 FPS enemy READY: meshes=%d bones=%d HP=%d zones=%d model=%s" % [
 		meshes.size(), rig.get_bone_count() if rig != null else 0, health, zones.size(), path
 	])
@@ -96,7 +101,11 @@ func _prepare_bone_tracks() -> void:
 
 func _physics_process(delta: float) -> void:
 	is_walking = false
-	if eliminated or model == null or not patrol_enabled or flinch_left > 0.0:
+	if eliminated or model == null or flinch_left > 0.0:
+		return
+	if combat != null and bool(combat.call("is_engaged")):
+		return
+	if not patrol_enabled:
 		return
 	if pause_patrol > 0.0:
 		pause_patrol = maxf(0.0, pause_patrol - delta)
@@ -203,7 +212,7 @@ func _setup_labels() -> void:
 	add_child(feedback)
 
 func _show_damage(amount: int, region: String) -> void:
-	feedback.text = "%s -%d" % [region.to_upper(), amount]
+	feedback.text = "HEADSHOT" if region == "Cabeca" else "-%d" % amount
 	feedback.position = Vector3(0, 2.08, 0)
 	feedback.modulate = Color(1.0, 0.28, 0.20) if region == "Cabeca" else Color(1.0, 0.90, 0.32)
 	feedback.visible = true

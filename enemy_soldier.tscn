@@ -12,3 +12,12 @@ script = ExtResource("1_enemy")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 position = Vector3(0, 0.90, 0)
 shape = SubResource("EnemyCapsule")
+
+# Debug-only locator: visible above a successfully imported soldier.
+# If locator is absent, verify branch and main scene instancing.
+[node name="DebugMarker" type="Label3D" parent="."]
+position = Vector3(0, 2.17, 0)
+billboard = 1
+pixel_size = 0.0038
+text = "SOLDADO TESTE"
+modulate = Color(1, 0.92, 0.44, 1)

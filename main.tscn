@@ -186,9 +186,10 @@ material_override = SubResource("TargetMaterial")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="TargetRight"]
 shape = SubResource("TargetShape")
 
-# Standalone static soldier target on the village road, clear of old targets.
+# First enemy appears near the initial player view, in the road and before red targets.
+# Temporary placement for asset/visibility diagnostics; no AI or weapon changes.
 [node name="EnemySoldierTest" parent="." instance=ExtResource("7_enemy")]
-position = Vector3(2.2, 0, -10.0)
+position = Vector3(1.0, 0, -4.0)
 rotation = Vector3(0, 3.1415927, 0)
 
 [node name="HUD" type="CanvasLayer" parent="."]

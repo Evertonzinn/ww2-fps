@@ -51,7 +51,7 @@ var recoil_pitch: float = 0.0
 var muzzle_timer: float = 0.0
 var walk_cycle: float = 0.0
 var rifle_instance: Node3D
-var active_texture_size: int = 2
+var active_texture_size: int = 1
 var bolt_player: AnimationPlayer
 var action_clip: StringName = &""
 var open_clip: StringName = &""
@@ -69,7 +69,7 @@ func _ready() -> void:
 	reload_fx.name = "ReloadFx"
 	add_child(reload_fx)
 	# Without a GLB, the scene's original procedural meshes remain visible.
-	_equip_real_rifle(2)
+	_equip_real_rifle(1)
 	shot_audio.stream = _placeholder_sound(true)
 	reload_audio.stream = _placeholder_sound(false)
 	_update_hud()

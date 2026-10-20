@@ -112,14 +112,22 @@ func set_texture_quality(high: bool) -> bool:
 	if bolt_running or reload_timer > 0.0:
 		return false
 	quality_high = high
-	var upgraded_path: String = MAG_GLB_2K if high else MAG_GLB_1K
-	var original_path: String = GLB_2K if high else GLB_1K
-	var path: String = upgraded_path if ResourceLoader.exists(upgraded_path) else original_path
-	if path != upgraded_path:
-		push_warning("Sniper v095 magazine asset missing; original rifle fallback: " + upgraded_path)
-	if not ResourceLoader.exists(path):
-		push_warning("Sniper GLB ausente: " + path)
+	var preferred_mag: String = MAG_GLB_2K if high else MAG_GLB_1K
+	var preferred_original: String = GLB_2K if high else GLB_1K
+	var fallback_mag: String = MAG_GLB_1K if high else MAG_GLB_2K
+	var fallback_original: String = GLB_1K if high else GLB_2K
+	var path: String = ""
+	for candidate in [preferred_mag, preferred_original, fallback_mag, fallback_original]:
+		if ResourceLoader.exists(candidate):
+			path = candidate
+			break
+	if path.is_empty():
+		push_warning("Sniper GLB absent in 1K and 2K qualities")
 		return false
+	if path == fallback_mag or path == fallback_original:
+		push_warning("Sniper: preferred texture quality missing; using available GLB " + path)
+	if path == preferred_original or path == fallback_original:
+		push_warning("Sniper: magazine v095 asset unavailable; base rifle model used")
 	var packed: PackedScene = ResourceLoader.load(path) as PackedScene
 	if packed == null:
 		return false

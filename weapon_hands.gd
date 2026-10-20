@@ -37,7 +37,7 @@ var left_chain: Array[int] = []
 var resting_shoulder_mid: Vector3 = Vector3.ZERO
 var current_right: Vector3 = Vector3.ZERO
 var current_left: Vector3 = Vector3.ZERO
-var ready: bool = false
+var hands_initialized: bool = false
 var active_quality: int = 0
 var reach_limited_frames: int = 0
 
@@ -69,7 +69,7 @@ func set_texture_quality(high: bool) -> bool:
 			push_warning("FPS hands optional GLB absent: " + path +
 				" (install the v0.16 rigged-hands kit)")
 			return false
-	if ready and chosen == active_quality:
+	if hands_initialized and chosen == active_quality:
 		return true
 	var packed: PackedScene = ResourceLoader.load(path) as PackedScene
 	if packed == null:
@@ -127,7 +127,7 @@ func set_texture_quality(high: bool) -> bool:
 	right_ik.start()
 	left_ik.start()
 	active_quality = chosen
-	ready = true
+	hands_initialized = true
 	print("WW2 FPS HANDS READY: %d bones, %d skinned meshes, quality=%dk, dual IK" % [
 		skeleton.get_bone_count(), meshes.size(), active_quality
 	])
@@ -140,7 +140,7 @@ func _shutdown_ik() -> void:
 		left_ik.stop()
 	right_ik = null
 	left_ik = null
-	ready = false
+	hands_initialized = false
 
 func _chain(rig: Skeleton3D, side: String) -> Array[int]:
 	var upper: int = _find_bone(rig, "arm1" + side)
@@ -216,7 +216,7 @@ func _target_left() -> Vector3:
 	return LEE_LEFT_SUPPORT
 
 func _process(delta: float) -> void:
-	if not ready or model_root == null or not is_instance_valid(model_root):
+	if not hands_initialized or model_root == null or not is_instance_valid(model_root):
 		return
 	if weapon == null or weapon.player_body == null:
 		return

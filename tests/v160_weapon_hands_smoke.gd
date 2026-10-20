@@ -25,7 +25,7 @@ func _run() -> void:
 		_fail("WeaponController was changed or removed")
 		return
 	var hands: FirstPersonWeaponHands = rifle.get_node_or_null("WeaponHands") as FirstPersonWeaponHands
-	if hands == null or hands.ready != true:
+	if hands == null or hands.hands_initialized != true:
 		_fail("both skinned FPS arms did not initialize")
 		return
 	if hands.skeleton == null or hands.skeleton.get_bone_count() < 50:

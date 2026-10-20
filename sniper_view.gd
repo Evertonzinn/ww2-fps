@@ -201,7 +201,10 @@ func _fire() -> void:
 	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
 	if not hit.is_empty():
 		var target: Object = hit.get("collider")
-		if target != null and target.has_method("take_damage"):
+		if target != null and target.has_method("take_sniper_damage"):
+			target.call("take_sniper_damage")
+			hud.call("show_hit_marker")
+		elif target != null and target.has_method("take_damage"):
 			target.call("take_damage", 1)
 			hud.call("show_hit_marker")
 	if magazine == 0 and reserve > 0:

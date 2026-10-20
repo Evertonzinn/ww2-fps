@@ -20,6 +20,9 @@ const MODEL_DIRECTORY: String = "res://assets/weapons/lee_enfield/"
 const ReloadEffects = preload("res://weapon_reload_fx.gd")
 const SniperViewScript = preload("res://sniper_view.gd")
 const WeaponHandsScript = preload("res://weapon_hands.gd")
+const BallisticTrace = preload("res://combat/ballistic_trace.gd")
+const MUZZLE_VELOCITY_MPS: float = 744.0
+const BULLET_GRAVITY_MPS2: float = 9.81
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -48,7 +51,7 @@ var recoil_pitch: float = 0.0
 var muzzle_timer: float = 0.0
 var walk_cycle: float = 0.0
 var rifle_instance: Node3D
-var active_texture_size: int = 2
+var active_texture_size: int = 1
 var bolt_player: AnimationPlayer
 var action_clip: StringName = &""
 var open_clip: StringName = &""
@@ -66,7 +69,7 @@ func _ready() -> void:
 	reload_fx.name = "ReloadFx"
 	add_child(reload_fx)
 	# Without a GLB, the scene's original procedural meshes remain visible.
-	_equip_real_rifle(2)
+	_equip_real_rifle(1)
 	shot_audio.stream = _placeholder_sound(true)
 	reload_audio.stream = _placeholder_sound(false)
 	_update_hud()
@@ -222,10 +225,10 @@ func _fire_hitscan() -> void:
 	pending_ejection = true
 
 	var origin: Vector3 = view_camera.global_position
-	var destination: Vector3 = origin - view_camera.global_transform.basis.z * MAX_RANGE
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, destination)
-	query.exclude = [player_body.get_rid()]
-	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	var direction: Vector3 = -view_camera.global_transform.basis.z
+	var excluded: Array[RID] = [player_body.get_rid()]
+	var hit: Dictionary = BallisticTrace.trace(get_world_3d().direct_space_state,
+		origin, direction, MAX_RANGE, MUZZLE_VELOCITY_MPS, BULLET_GRAVITY_MPS2, excluded)
 	if not hit.is_empty():
 		var target: Object = hit.get("collider")
 		if target != null and target.has_method("take_damage"):
@@ -317,10 +320,21 @@ func _equip_real_rifle(size: int) -> bool:
 		MODEL_DIRECTORY + "lee_enfield_%dk.glb" % size
 	]
 	var chosen: String = ""
+	var loaded_size: int = size
 	for path in sources:
 		if ResourceLoader.exists(path):
 			chosen = path
 			break
+	if chosen.is_empty():
+		var fallback_size: int = 1 if size == 2 else 2
+		for suffix in ["lee_enfield_charger_%dk.glb", "lee_enfield_rigged_once_%dk.glb",
+				"lee_enfield_rigged_%dk.glb", "lee_enfield_%dk.glb"]:
+			var candidate: String = MODEL_DIRECTORY + (suffix % fallback_size)
+			if ResourceLoader.exists(candidate):
+				chosen = candidate
+				loaded_size = fallback_size
+				push_warning("Lee-Enfield: preferred texture quality missing, using " + chosen)
+				break
 	if chosen.is_empty():
 		return false
 	var scene: PackedScene = ResourceLoader.load(chosen) as PackedScene
@@ -335,7 +349,7 @@ func _equip_real_rifle(size: int) -> bool:
 	if rifle_instance != null:
 		rifle_instance.queue_free()
 	rifle_instance = replacement
-	active_texture_size = size
+	active_texture_size = loaded_size
 	_bind_animations()
 	for child in get_children():
 		if child is MeshInstance3D and child != muzzle_flash:

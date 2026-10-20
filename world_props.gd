@@ -2,6 +2,8 @@ extends Node3D
 
 const VillageProps = preload("res://environment/prop_builder.gd")
 const EnemySoldierScene = preload("res://enemy_soldier.tscn")
+const RemasterPass = preload("res://environment/remaster_pass.gd")
+const RealAssetPass = preload("res://environment/real_asset_pass.gd")
 
 # Vila de testes gerada em tempo de execucao: sem downloads, texturas ou assets externos.
 var stone: StandardMaterial3D
@@ -48,6 +50,8 @@ func _ready() -> void:
 	_tree("TreeWest", Vector3(-18.0, 0.0, 12.0))
 	_tree("TreeEast", Vector3(18.0, 0.0, -17.0))
 	VillageProps.populate(self, stone, timber, grass, brick)
+	RemasterPass.populate(self)
+	RealAssetPass.populate(self)
 	# Defer instantiation until the World finishes its setup and child ready pass.
 	call_deferred("_spawn_initial_enemy")
 	print("WW2 FPS world: enemy spawn scheduled")
@@ -147,11 +151,11 @@ func _setup_daylight() -> void:
 	# Sem GI dinamica, SSAO, glow ou sombras de alta resolucao.
 	var env_resource: Environment = Environment.new()
 	env_resource.background_mode = Environment.BG_COLOR
-	env_resource.background_color = Color(0.60, 0.72, 0.83)
+	env_resource.background_color = Color(0.50, 0.57, 0.63)
 	env_resource.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env_resource.ambient_light_color = Color(0.84, 0.86, 0.88)
 	env_resource.ambient_light_sky_contribution = 0.0
-	env_resource.ambient_light_energy = 0.75
+	env_resource.ambient_light_energy = 0.64
 
 	var world_environment: WorldEnvironment = WorldEnvironment.new()
 	world_environment.name = "DaylightEnvironment"
@@ -159,7 +163,7 @@ func _setup_daylight() -> void:
 	add_child(world_environment)
 
 	var sun: DirectionalLight3D = get_node("DirectionalLight3D") as DirectionalLight3D
-	sun.light_color = Color(1.0, 0.96, 0.86)
+	sun.light_color = Color(1.0, 0.93, 0.82)
 	sun.light_energy = 1.2
 	sun.shadow_enabled = false
 

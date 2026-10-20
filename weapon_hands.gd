@@ -86,6 +86,11 @@ func set_texture_quality(high: bool) -> bool:
 		if high and ResourceLoader.exists(MODEL_1K):
 			path = MODEL_1K
 			chosen = 1
+		elif not high and ResourceLoader.exists(MODEL_2K):
+			# A locally installed 2K-only arm rig must still render.
+			path = MODEL_2K
+			chosen = 2
+			push_warning("FPS hands: 1K asset missing, using 2K (higher VRAM cost)")
 		else:
 			push_warning("FPS hands optional GLB absent: " + path +
 				" (install the v0.16 rigged-hands kit)")

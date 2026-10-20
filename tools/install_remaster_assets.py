@@ -50,7 +50,9 @@ def safe_members(archive: ZipFile):
         if p.is_absolute() or ".." in p.parts or "\\" in info.filename:
             raise ValueError("unsafe zip member: " + info.filename)
         if not p.parts or p.suffix.lower() not in ALLOWED:
-            raise ValueError("unexpected entry: " + info.filename)
+            # Sketchfab archives can include optional previews and vendor
+            # formats. Never extract those into the Godot import directory.
+            continue
         if info.file_size > MAX_MEMBER_BYTES:
             raise ValueError("oversized member: " + info.filename)
         # Refuse special files and symlinks; ordinary ZIPs often have no UNIX mode.
@@ -59,7 +61,7 @@ def safe_members(archive: ZipFile):
             raise ValueError("non-regular file: " + info.filename)
         yield info
 
-def validate_gltf(scene_file: Path) -> dict:
+def validate_gltf(scene_file: Path, package_root: Path) -> dict:
     data = json.loads(scene_file.read_text(encoding="utf-8"))
     if data.get("asset", {}).get("version") != "2.0":
         raise ValueError("not a glTF 2.0 asset")
@@ -74,7 +76,8 @@ def validate_gltf(scene_file: Path) -> dict:
         if uri.startswith(("http:", "https:", "/", "\\")):
             raise ValueError("external resource URL/path rejected: " + uri)
         rel = posixpath.normpath(uri)
-        if rel == ".." or rel.startswith("../") or not (scene_file.parent / rel).is_file():
+        resolved = (scene_file.parent / rel).resolve()
+        if not resolved.is_relative_to(package_root.resolve()) or not resolved.is_file():
             raise ValueError("missing/unsafe referenced file: " + uri)
     return {
         "mesh_count": len(data.get("meshes", [])),
@@ -112,7 +115,10 @@ def install_one(archive_path: Path, dest: Path, max_side: int, image_lib) -> dic
             if not license_name:
                 raise ValueError("Sketchfab asset missing license.txt")
             license_text = archive.read(license_name).decode("utf-8", errors="replace")
-            if "CC-BY-4.0" not in license_text and "creativecommons.org/licenses/by/4.0" not in license_text:
+            license_upper = license_text.upper()
+            if not any(marker in license_upper for marker in (
+                    "CC-BY-4.0", "CC BY 4.0", "CREATIVE COMMONS ATTRIBUTION 4.0",
+                    "CREATIVECOMMONS.ORG/LICENSES/BY/4.0")):
                 raise ValueError("unexpected/unsupported asset license")
             for member in members:
                 out = temp / member.filename
@@ -122,9 +128,8 @@ def install_one(archive_path: Path, dest: Path, max_side: int, image_lib) -> dic
         scenes = list(temp.rglob("*.gltf"))
         if len(scenes) != 1:
             raise ValueError("expected exactly one glTF scene, got %d" % len(scenes))
-        details = validate_gltf(scenes[0])
-        if scenes[0].parent != temp:
-            raise ValueError("model scene needs root-level scene.gltf")
+        details = validate_gltf(scenes[0], temp)
+        details["scene_path"] = scenes[0].relative_to(temp).as_posix()
         texture_info = {}
         for source in list(temp.rglob("*")):
             if not source.is_file() or source.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):

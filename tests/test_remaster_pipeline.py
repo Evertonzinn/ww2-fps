@@ -71,6 +71,14 @@ class InstallerSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing/unsafe"):
                 validate_gltf(self._scene(root, "../other.bin"), root)
 
+    def test_empty_gltf_meshes_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "scene.gltf"
+            path.write_text('{"asset":{"version":"2.0"},"meshes":[]}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "no meshes"):
+                validate_gltf(path, root)
+
     def test_non_gltf_v2_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

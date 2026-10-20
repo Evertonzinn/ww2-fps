@@ -65,8 +65,22 @@ func unequip() -> void:
 	active = false
 	pending_fire = false
 	visible = false
+	_reset_scope()
+
+func _notification(what: int) -> void:
+	# Esc pauses processing before the next _process can leave ADS.
+	if what == NOTIFICATION_PAUSED and active:
+		_reset_scope()
+
+func _reset_scope() -> void:
 	if scope_layer != null:
 		scope_layer.visible = false
+	camera.fov = 75.0
+	crosshair.visible = true
+	if rifle != null:
+		rifle.visible = true
+	if flash != null:
+		flash.visible = false
 
 func is_busy() -> bool:
 	return reload_timer > 0.0 or shot_timer > 0.0 or bolt_running
@@ -174,14 +188,17 @@ func _make_scope() -> void:
 	scope_layer = CanvasLayer.new()
 	scope_layer.name = "SniperScopeHUD"
 	scope_layer.layer = 6
-	get_tree().current_scene.add_child(scope_layer)
+	scope_layer.visible = false
+	# The scene root is still propagating child _ready calls and rejects
+	# add_child here. Our own _ready can safely add children to this node.
+	# CanvasLayer stays screen-space and is freed together with the weapon.
+	add_child(scope_layer)
 	var overlay: Control = ScopeOverlayScript.new() as Control
 	overlay.name = "SniperScopeReticle"
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	scope_layer.add_child(overlay)
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay.queue_redraw()
-	scope_layer.visible = false
 
 func _bind_bolt() -> void:
 	bolt_mesh = null

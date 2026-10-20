@@ -56,6 +56,8 @@ static func _replace_visual(existing: Node3D, relative: String, dimensions: Vect
 	for child in existing.get_children():
 		if child is MeshInstance3D:
 			(child as MeshInstance3D).visible = false
+		elif existing.name.begins_with("Tree") and child is MultiMeshInstance3D:
+			(child as MultiMeshInstance3D).visible = false
 	return true
 
 static func install_enemy_rifle(gun: Node3D) -> bool:

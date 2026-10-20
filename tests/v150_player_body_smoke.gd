@@ -42,6 +42,31 @@ func _run() -> void:
 		quit(1)
 		return
 	print("PASS: rigged British body with %d bones" % rig.get_bone_count())
+	var bounds: AABB = body.get("lower_body_bounds")
+	if body.get("measured_lower_body") != true or bounds.size.y < 0.2 or bounds.size.y > 3.0:
+		push_error("v0.15 BODY SMOKE FAIL: invalid skinned lower-body geometry scale")
+		quit(1)
+		return
+	var soldier_root: Node3D = body.get("soldier") as Node3D
+	if soldier_root == null:
+		push_error("v0.15 BODY SMOKE FAIL: imported soldier reference missing")
+		quit(1)
+		return
+	var leg_mid_x: float = bounds.position.x + bounds.size.x * 0.5
+	if absf(soldier_root.position.x + leg_mid_x) > 0.03:
+		push_error("v0.15 BODY SMOKE FAIL: pants/boots not centred")
+		quit(1)
+		return
+	if absf(soldier_root.position.y + bounds.position.y) > 0.03:
+		push_error("v0.15 BODY SMOKE FAIL: boot soles not aligned to local ground")
+		quit(1)
+		return
+	var leg_mid_z: float = bounds.position.z + bounds.size.z * 0.5
+	if soldier_root.position.z + leg_mid_z > -0.14:
+		push_error("v0.15 BODY SMOKE FAIL: body preview not staged in forward view")
+		quit(1)
+		return
+	print("PASS: real British skinned boots/trousers measured and camera-framed")
 	# Regression for v0.15.3: the complete torso/vest occupied the FPS
 	# viewport and hid both rifles. Only Pants and Boots may be visible.
 	var visual: Node3D = body.get_node_or_null("BritishSoldierFPS") as Node3D
@@ -70,21 +95,32 @@ func _run() -> void:
 		push_error("v0.15 BODY SMOKE FAIL: FPS camera head missing")
 		quit(1)
 		return
+	# Lower body must not disappear when the view pitch changes. Meshes
+	# above the belt stay hidden individually (checked above).
 	head.rotation.x = 0.0
 	body.call("_process", 0.016)
-	if visual.visible:
-		push_error("v0.15 BODY SMOKE FAIL: soldier still obstructs forward aim")
+	if not visual.visible:
+		push_error("v0.15 BODY SMOKE FAIL: skinned legs vanish in normal stance")
 		quit(1)
 		return
 	head.rotation.x = -1.0
 	body.call("_process", 0.016)
 	if not visual.visible:
-		push_error("v0.15 BODY SMOKE FAIL: trousers and boots hidden while looking down")
+		push_error("v0.15 BODY SMOKE FAIL: skinned legs vanish when looking down")
+		quit(1)
+		return
+	var visible_in_tree: int = 0
+	for node in visual.find_children("*", "MeshInstance3D", true, false):
+		var piece: MeshInstance3D = node as MeshInstance3D
+		if piece.visible and piece.is_visible_in_tree():
+			visible_in_tree += 1
+	if visible_in_tree < 2:
+		push_error("v0.15 BODY SMOKE FAIL: lower-body mesh ancestors are hidden")
 		quit(1)
 		return
 	head.rotation.x = 0.0
 	body.call("_process", 0.016)
-	print("PASS: FPS viewport unobstructed; Pants/Boots visible only when looking down")
+	print("PASS: skinned trousers/boots remain present across pitch; vest/head hidden")
 	if player.get_node_or_null("StanceController") == null or player.get_node_or_null("Head/Camera3D/Weapon") == null:
 		push_error("v0.15 BODY SMOKE FAIL: previous stance or rifle contracts lost")
 		quit(1)

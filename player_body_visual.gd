@@ -10,6 +10,9 @@ const REQUIRED = [
 @export_range(-180.0, 180.0, 1.0) var body_yaw_degrees: float = 0.0
 @export var conceal_unbound_fps_arms: bool = true
 @export var preview_walk_legs: bool = true
+# Cosmetic offset of skinned trousers toward the player's forward view.
+# No effect on collision, muzzle, bullet trace or player position.
+@export_range(0.15, 0.80, 0.01) var leg_preview_forward: float = 0.46
 
 var player: CharacterBody3D
 var soldier: Node3D
@@ -25,6 +28,8 @@ var visual_loaded: bool = false
 # were removed during conversion. Never expose those meshes in FPS.
 var fps_lower_mesh_count: int = 0
 var fps_hidden_upper_mesh_count: int = 0
+var lower_body_bounds: AABB = AABB()
+var measured_lower_body: bool = false
 
 func _ready() -> void:
 	player = get_parent() as CharacterBody3D
@@ -85,6 +90,34 @@ func _ready() -> void:
 	if not has_pants or not has_boots:
 		_fail("FPS body requires separate Pants and Boots meshes; hiding unsafe model")
 		return
+
+	# Measure actual nested imported glTF transforms, not guessed source-FBX
+	# coordinates. A visible=true flag alone does not put legs in camera.
+	var min_corner: Vector3 = Vector3(INF, INF, INF)
+	var max_corner: Vector3 = Vector3(-INF, -INF, -INF)
+	for node in meshes:
+		var piece: MeshInstance3D = node as MeshInstance3D
+		if piece == null or not piece.visible:
+			continue
+		var garment_bounds: AABB = piece.get_aabb()
+		for corner_index in range(8):
+			var point: Vector3 = soldier.to_local(piece.to_global(
+				garment_bounds.get_endpoint(corner_index)))
+			min_corner = min_corner.min(point)
+			max_corner = max_corner.max(point)
+	lower_body_bounds = AABB(min_corner, max_corner - min_corner)
+	if lower_body_bounds.size.y < 0.20 or lower_body_bounds.size.y > 3.0:
+		_fail("unusable Pants/Boots height %.3fm; verify GLB scale" %
+			lower_body_bounds.size.y)
+		return
+	var lower_mid: Vector3 = lower_body_bounds.position + lower_body_bounds.size * 0.5
+	soldier.position = Vector3(-lower_mid.x, -lower_body_bounds.position.y,
+		-leg_preview_forward - lower_mid.z)
+	measured_lower_body = true
+	print("WW2 British PlayerBody BOUNDS: min=%s size=%s preview=%s" % [
+		str(lower_body_bounds.position), str(lower_body_bounds.size),
+		str(soldier.position)
+	])
 	if conceal_unbound_fps_arms:
 		# Stage 1: use the original player rifle viewmodels; do not draw
 		# detached T-pose arms while full rifle-grip IK is still pending.
@@ -115,13 +148,12 @@ func _process(delta: float) -> void:
 		centre = 0.34
 	# Keep boots at the ground plane as Player's capsule changes height.
 	position.y = -centre
-	# Never let the skinned body obstruct normal first-person targeting.
-	# Pants/boots appear only when deliberately looking down at the feet.
-	# Hide the preview on ADS and in prone (no authored prone clip yet).
-	var camera_head: Node3D = player.get_node_or_null("Head") as Node3D
-	var looking_down: bool = camera_head != null and camera_head.rotation.x <= -0.55
+	# The lower-body garments stay present. Their actual geometry is below
+	# the eye position and outside the forward aim ray; looking downward
+	# reveals them naturally, without the old artificial -31-degree gate.
+	# Hide only in prone (missing authored clip) and while aiming RMB.
 	var ads_active: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	soldier.visible = stance != 2 and looking_down and not ads_active
+	soldier.visible = stance != 2 and not ads_active
 	var displacement: Vector3 = player.global_position - previous_position
 	displacement.y = 0.0
 	previous_position = player.global_position
@@ -134,11 +166,16 @@ func _process(delta: float) -> void:
 		1.0 if displacement.length_squared() > 0.00000001 else 0.0,
 		delta * 5.0)
 	var gait: float = sin(walk_cycle) * walking_blend
+	var pace: float = displacement.length() / maxf(delta, 0.001)
+	var run_factor: float = clampf((pace - 4.0) / 4.0, 0.0, 1.0)
+	var swing: float = lerpf(0.23, 0.35, run_factor)
 	var crouch: float = 1.0 if stance == 1 else 0.0
-	_pose_leg("CC_Base_L_Thigh", gait * 0.14 - crouch * 0.30)
-	_pose_leg("CC_Base_R_Thigh", -gait * 0.14 - crouch * 0.30)
-	_pose_leg("CC_Base_L_Calf", maxf(0.0, -gait) * 0.14 + crouch * 0.24)
-	_pose_leg("CC_Base_R_Calf", maxf(0.0, gait) * 0.14 + crouch * 0.24)
+	if stance == 1:
+		swing = 0.12
+	_pose_leg("CC_Base_L_Thigh", gait * swing - crouch * 0.30)
+	_pose_leg("CC_Base_R_Thigh", -gait * swing - crouch * 0.30)
+	_pose_leg("CC_Base_L_Calf", maxf(0.0, -gait) * swing * 0.66 + crouch * 0.24)
+	_pose_leg("CC_Base_R_Calf", maxf(0.0, gait) * swing * 0.66 + crouch * 0.24)
 
 func _pose_leg(name: String, angle: float) -> void:
 	if not bones.has(name):

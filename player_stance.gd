@@ -43,12 +43,16 @@ func _ready() -> void:
 	prone_shape.radius = PRONE_RADIUS
 	prone_shape.height = PRONE_LENGTH
 	standing_collider.shape = standing_shape
-	prone_collider = CollisionShape3D.new()
-	prone_collider.name = "ProneCollisionShape3D"
+	# This collider is a declared, disabled child of Player in main.tscn.
+	# It cannot be registered late while the parent's _ready() is running.
+	prone_collider = player.get_node_or_null("ProneCollisionShape3D") as CollisionShape3D
+	if prone_collider == null:
+		push_error("WW2 player stance: missing ProneCollisionShape3D in main.tscn")
+		set_process(false)
+		return
 	prone_collider.shape = prone_shape
 	prone_collider.rotation.x = PI * 0.5
 	prone_collider.disabled = true
-	player.add_child(prone_collider)
 	last_standing_camera = head.position
 	last_step_position = player.global_position
 	call_deferred("_notify_stance")
@@ -66,7 +70,7 @@ func handle_input(event: InputEvent) -> bool:
 	if not key_event.pressed or key_event.echo:
 		return false
 	# Physical Ctrl on Debian, including either left or right Control.
-	var code: Key = key_event.physical_keycode
+	var code: int = key_event.physical_keycode
 	if code == KEY_NONE:
 		code = key_event.keycode
 	if code == KEY_C:
@@ -191,7 +195,7 @@ func record_movement() -> void:
 		player.call("report_footstep", radius)
 
 func _notify_stance() -> void:
-	if player == null or player.is_dead:
+	if player == null or bool(player.get("is_dead")):
 		return
 	var hud: Node = player.get_tree().current_scene.get_node_or_null("HUD")
 	if hud == null or not hud.has_method("show_player_stance"):

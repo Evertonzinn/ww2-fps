@@ -19,6 +19,7 @@ const AIM_FOV: float = 55.0
 const MODEL_DIRECTORY: String = "res://assets/weapons/lee_enfield/"
 const ReloadEffects = preload("res://weapon_reload_fx.gd")
 const SniperViewScript = preload("res://sniper_view.gd")
+const WeaponHandsScript = preload("res://weapon_hands.gd")
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -56,6 +57,7 @@ var reload_fx: RifleReloadFx
 var sniper_view: SniperView
 var sniper_equipped: bool = false
 var requested_high_texture: bool = false
+var fps_hands: FirstPersonWeaponHands
 
 func _ready() -> void:
 	position = HIP_POSITION
@@ -71,6 +73,11 @@ func _ready() -> void:
 	sniper_view = SniperViewScript.new() as SniperView
 	sniper_view.name = "SniperView"
 	add_child(sniper_view)
+	# Optional PBR-skinned hand viewmodel; visual-only, never changes
+	# ammo, camera ADS, weapon animations, hit detection or FOV.
+	fps_hands = WeaponHandsScript.new() as FirstPersonWeaponHands
+	fps_hands.name = "WeaponHands"
+	add_child(fps_hands)
 
 func select_weapon(slot: int) -> void:
 	if slot == 2:
@@ -291,6 +298,8 @@ func _update_hud() -> void:
 
 func set_texture_quality(high_quality: bool) -> bool:
 	requested_high_texture = high_quality
+	if fps_hands != null:
+		fps_hands.set_texture_quality(high_quality)
 	if sniper_equipped:
 		return sniper_view.set_texture_quality(high_quality)
 	if reloading or pending_reload or bolt_timer > 0.0:

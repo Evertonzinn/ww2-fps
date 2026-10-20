@@ -1,6 +1,7 @@
 extends Node3D
 
 const CoverPlanner = preload("res://enemy_cover.gd")
+const RealAssetPass = preload("res://environment/real_asset_pass.gd")
 enum Tactic { PATROL, INVESTIGATE, ADVANCE, SEEK_COVER, IN_COVER }
 
 # WW2 FPS v0.12 — fair combat: finite sight, reaction time, miss chance,
@@ -298,6 +299,9 @@ func _create_gun() -> void:
 	var support_fingers: Vector3 = Vector3(0.8, 0, -0.6)
 	left_grip.basis = Basis(Vector3.UP, support_fingers, Vector3.UP.cross(support_fingers))
 	gun.add_child(left_grip)
+	# Replace only the cosmetic enemy rifle. IK grips, muzzle and shot logic
+	# remain owned by the original combat controller.
+	RealAssetPass.install_enemy_rifle(gun)
 
 func _box(part: String, where: Vector3, dimensions: Vector3, material: Material) -> void:
 	var node: MeshInstance3D = MeshInstance3D.new()

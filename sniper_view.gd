@@ -5,6 +5,16 @@ const ScopeOverlayScript = preload("res://sniper_scope_overlay.gd")
 const BOLT_CYCLE_SECONDS: float = 0.90
 const BOLT_TRAVEL: float = 0.070
 const BOLT_LIFT_RAD: float = 0.72
+# Magazine geometry resides in the GLB original source coordinates, below receiver.
+# Animation touches only the new named pivot, never the original 4 source meshes.
+const MAG_GLB_1K: String = "res://assets/weapons/sniper/sniper_rifle_mag_1k.glb"
+const MAG_GLB_2K: String = "res://assets/weapons/sniper/sniper_rifle_mag_2k.glb"
+const MAG_MAX_DROPS: int = 6
+const MAG_EJECT_END: float = 0.32
+const MAG_INSERT_START: float = 0.51
+const MAG_INSERT_END: float = 0.94
+const MAG_INSERT_TRAVEL: float = 0.16
+
 
 # Separate 5-round scoped gun with no imported animations. CC BY 4.0 asset.
 const GLB_1K: String = "res://assets/weapons/sniper/sniper_rifle_1k.glb"
@@ -38,6 +48,14 @@ var bolt_mesh: MeshInstance3D
 var bolt_rest: Transform3D
 var bolt_elapsed: float = 0.0
 var bolt_running: bool = false
+var magazine_pivot: Node3D
+var magazine_rest: Transform3D
+var magazine_anim_time: float = 0.0
+var magazine_anim_duration: float = RELOAD_TIME
+var magazine_waiting_for_bolt: bool = false
+var magazine_drop_spawned: bool = false
+var magazine_drops: Array[RigidBody3D] = []
+
 
 func _ready() -> void:
 	camera = get_parent().get_parent() as Camera3D
@@ -89,7 +107,9 @@ func set_texture_quality(high: bool) -> bool:
 	if bolt_running or reload_timer > 0.0:
 		return false
 	quality_high = high
-	var path: String = GLB_2K if high else GLB_1K
+	var upgraded_path: String = MAG_GLB_2K if high else MAG_GLB_1K
+	var original_path: String = GLB_2K if high else GLB_1K
+	var path: String = upgraded_path if ResourceLoader.exists(upgraded_path) else original_path
 	if not ResourceLoader.exists(path):
 		push_warning("Sniper GLB ausente: " + path)
 		return false
@@ -110,6 +130,7 @@ func set_texture_quality(high: bool) -> bool:
 		rifle.queue_free()
 	rifle = new_rifle
 	_bind_bolt()
+	_bind_magazine()
 	return true
 
 func request_fire() -> void:
@@ -120,6 +141,8 @@ func request_reload() -> void:
 	if not active or reload_timer > 0.0 or magazine >= CAPACITY or reserve <= 0:
 		return
 	reload_timer = RELOAD_TIME
+	# Gameplay ammo remains authoritative; magazine animation only visual.
+	_begin_magazine_reload()
 	reload_audio.play()
 	_update_hud()
 
@@ -133,6 +156,7 @@ func _physics_process(delta: float) -> void:
 			var amount: int = mini(CAPACITY - magazine, reserve)
 			magazine += amount
 			reserve -= amount
+			_restore_magazine_pose()
 			_update_hud()
 	if pending_fire:
 		pending_fire = false
@@ -143,6 +167,7 @@ func _process(delta: float) -> void:
 	if not active:
 		return
 	_update_bolt(delta)
+	_update_magazine_reload(delta)
 	var aiming: bool = reload_timer <= 0.0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	var desired: Vector3 = ADS if aiming else HIP
 	desired.z += recoil
@@ -256,6 +281,122 @@ func _update_bolt(delta: float) -> void:
 func _ease(t: float) -> float:
 	var v: float = clampf(t, 0.0, 1.0)
 	return v * v * (3.0 - 2.0 * v)
+
+func _bind_magazine() -> void:
+	magazine_pivot = null
+	magazine_anim_time = 0.0
+	magazine_drop_spawned = false
+	magazine_waiting_for_bolt = false
+	if rifle == null:
+		return
+	var matches: Array[Node] = rifle.find_children("SniperMagazinePivot*", "Node3D", true, false)
+	for node in matches:
+		if node is Node3D:
+			magazine_pivot = node as Node3D
+			break
+	if magazine_pivot == null:
+		# Older user assets still work, only without animated detachable magazine.
+		return
+	magazine_rest = magazine_pivot.transform
+	magazine_pivot.visible = true
+	print("Sniper: detachable 3D magazine imported: ", magazine_pivot.name)
+
+func _begin_magazine_reload() -> void:
+	magazine_anim_time = 0.0
+	magazine_drop_spawned = false
+	magazine_waiting_for_bolt = bolt_running
+	# An automatic reload can start while the previous shot's bolt is cycling.
+	# Wait for its original animation, then fit the visual swap into the
+	# remaining reload time, without extending or altering gameplay timers.
+	magazine_anim_duration = maxf(0.65, RELOAD_TIME - (BOLT_CYCLE_SECONDS if bolt_running else 0.0))
+	if magazine_pivot != null and is_instance_valid(magazine_pivot):
+		magazine_pivot.transform = magazine_rest
+		magazine_pivot.visible = true
+
+func _update_magazine_reload(delta: float) -> void:
+	if magazine_pivot == null or not is_instance_valid(magazine_pivot):
+		return
+	if reload_timer <= 0.0:
+		# Ammo update can finish from _physics_process before this frame.
+		_restore_magazine_pose()
+		return
+	if magazine_waiting_for_bolt:
+		if bolt_running:
+			return
+		magazine_waiting_for_bolt = false
+	magazine_anim_time += delta
+	var progress: float = clampf(magazine_anim_time / magazine_anim_duration, 0.0, 1.0)
+	if progress < MAG_EJECT_END:
+		# Unlock, then slide downward along the imported rifle's local -Z.
+		var t: float = _ease(progress / MAG_EJECT_END)
+		magazine_pivot.visible = true
+		magazine_pivot.transform = magazine_rest * Transform3D(
+			Basis(Vector3.RIGHT, t * 0.12),
+			Vector3(0.0, 0.0, -0.037 * t)
+		)
+	elif progress < MAG_INSERT_START:
+		if not magazine_drop_spawned:
+			magazine_drop_spawned = true
+			# A real physics prop, not a second gun-mounted magazine.
+			var expelled: Transform3D = magazine_pivot.global_transform
+			call_deferred("_spawn_dropped_magazine", expelled)
+		magazine_pivot.visible = false
+	else:
+		# A fresh magazine approaches from below. Hold briefly at the lock.
+		var t: float = _ease(clampf((progress - MAG_INSERT_START) / (MAG_INSERT_END - MAG_INSERT_START), 0.0, 1.0))
+		magazine_pivot.visible = true
+		magazine_pivot.transform = magazine_rest * Transform3D(
+			Basis(Vector3.RIGHT, (1.0 - t) * -0.15),
+			Vector3(0.0, 0.0, -MAG_INSERT_TRAVEL * (1.0 - t))
+		)
+
+func _restore_magazine_pose() -> void:
+	if magazine_pivot != null and is_instance_valid(magazine_pivot):
+		magazine_pivot.transform = magazine_rest
+		magazine_pivot.visible = true
+	magazine_waiting_for_bolt = false
+
+func _spawn_dropped_magazine(from_transform: Transform3D) -> void:
+	if magazine_pivot == null or not is_instance_valid(magazine_pivot):
+		return
+	var world: Node3D = get_tree().current_scene as Node3D
+	if world == null:
+		return
+	# Duplicate only the magazine subtree with its original PBR surfaces.
+	var visual: Node3D = magazine_pivot.duplicate() as Node3D
+	if visual == null:
+		return
+	visual.name = "SpentMagazineVisual"
+	visual.transform = Transform3D.IDENTITY
+	visual.visible = true
+	var body: RigidBody3D = RigidBody3D.new()
+	body.name = "SpentSniperMagazine"
+	body.mass = 0.16
+	body.collision_layer = 0
+	body.collision_mask = 1
+	body.add_child(visual)
+	var hitbox: CollisionShape3D = CollisionShape3D.new()
+	var shape: BoxShape3D = BoxShape3D.new()
+	shape.size = Vector3(0.029, 0.064, 0.09)
+	hitbox.shape = shape
+	body.add_child(hitbox)
+	world.add_child(body)
+	body.global_transform = from_transform
+	if is_instance_valid(player_body):
+		body.add_collision_exception_with(player_body)
+	var right: Vector3 = camera.global_transform.basis.x.normalized()
+	body.apply_central_impulse(right * 0.035 + Vector3.UP * 0.014)
+	body.angular_velocity = right * 4.0 + camera.global_transform.basis.z * 5.0
+	magazine_drops.append(body)
+	while magazine_drops.size() > MAG_MAX_DROPS:
+		var previous: RigidBody3D = magazine_drops.pop_front()
+		if is_instance_valid(previous):
+			previous.queue_free()
+	# This timer pauses with SceneTree, including pause menu.
+	get_tree().create_timer(12.0, false).timeout.connect(func() -> void:
+		if is_instance_valid(body):
+			body.queue_free()
+	)
 
 func _make_flash() -> void:
 	flash = MeshInstance3D.new()

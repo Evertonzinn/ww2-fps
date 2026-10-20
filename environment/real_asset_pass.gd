@@ -100,10 +100,27 @@ static func install_enemy_rifle(gun: Node3D) -> bool:
 	return true
 
 static func _get_model(relative: String) -> PackedScene:
-	var path: String = ASSET_ROOT + relative + "/scene.gltf"
-	if not ResourceLoader.exists(path):
+	# Sketchfab ZIPs can nest scene.gltf under a source/ directory.
+	# Resolve only within the named asset folder, never outside the package.
+	var directory: String = ASSET_ROOT + relative
+	var path: String = _find_scene_path(directory, 0)
+	if path.is_empty():
 		return null
 	return ResourceLoader.load(path) as PackedScene
+
+static func _find_scene_path(directory: String, depth: int) -> String:
+	if depth > 3 or not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(directory)):
+		return ""
+	for file_name in DirAccess.get_files_at(directory):
+		if file_name.get_extension().to_lower() == "gltf":
+			return directory + "/" + file_name
+	for subdir in DirAccess.get_directories_at(directory):
+		if subdir.begins_with("."):
+			continue
+		var result: String = _find_scene_path(directory + "/" + subdir, depth + 1)
+		if not result.is_empty():
+			return result
+	return ""
 
 static func _mesh_bounds(root: Node3D) -> AABB:
 	var have: bool = false

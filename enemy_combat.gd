@@ -148,7 +148,7 @@ func _create_gun() -> void:
 	gun.name = "EnemyRiflePrototype"
 	# Orient the complete rifle muzzle-forward in the model's -Z axis,
 	# just in front of the sternum, not behind its back.
-	gun.position = Vector3(0.10, 1.33, -0.37)
+	gun.position = Vector3(0.00, 1.33, -0.21)
 	gun.rotation.x = -0.045
 	soldier.add_child(gun)
 	var wood: StandardMaterial3D = StandardMaterial3D.new()
@@ -176,11 +176,11 @@ func _create_gun() -> void:
 	# IK markers in the exact same visual-gun coordinate system.
 	right_grip = Marker3D.new()
 	right_grip.name = "TriggerGrip"
-	right_grip.position = Vector3(0.02, -0.07, 0.08)
+	right_grip.position = Vector3(-0.08, -0.07, 0.09)
 	gun.add_child(right_grip)
 	left_grip = Marker3D.new()
 	left_grip.name = "SupportGrip"
-	left_grip.position = Vector3(-0.025, -0.06, -0.34)
+	left_grip.position = Vector3(0.06, -0.08, -0.20)
 	gun.add_child(left_grip)
 
 func _box(part: String, where: Vector3, dimensions: Vector3, material: Material) -> void:

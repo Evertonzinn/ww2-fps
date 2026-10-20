@@ -181,7 +181,8 @@ func _pose(name: String, axis: Vector3, angle: float) -> void:
 	# desired axis in the character's world frame, then in the joint parent.
 	var world_axis: Vector3 = (global_transform.basis * axis).normalized()
 	var skeleton_axis: Vector3 = (rig.global_transform.basis.inverse() * world_axis).normalized()
-	var parent_axis: Vector3 = parent_rotation.inverse() * skeleton_axis
+	var rest_rotation: Quaternion = rig.get_bone_rest(index).basis.get_rotation_quaternion()
+	var parent_axis: Vector3 = (parent_rotation * rest_rotation).inverse() * skeleton_axis
 	var baseline: Quaternion = initial_rotations[index]
 	rig.set_bone_pose_rotation(index, Quaternion(parent_axis.normalized(), angle) * baseline)
 
@@ -248,7 +249,9 @@ func _align_bone_segment(index: int, from_direction: Vector3,
 		parent_rotation = rig.get_bone_global_pose(parent_index).basis.get_rotation_quaternion()
 	var desired_change: Quaternion = Quaternion(from_direction.normalized(),
 		to_direction.normalized())
-	var local_change: Quaternion = parent_rotation.inverse() * desired_change * parent_rotation
+	var rest_rotation: Quaternion = rig.get_bone_rest(index).basis.get_rotation_quaternion()
+	var joint_frame: Quaternion = parent_rotation * rest_rotation
+	var local_change: Quaternion = joint_frame.inverse() * desired_change * joint_frame
 	var old_pose: Quaternion = rig.get_bone_pose_rotation(index)
 	rig.set_bone_pose_rotation(index, (local_change * old_pose).normalized())
 

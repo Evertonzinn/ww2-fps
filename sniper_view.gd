@@ -2,6 +2,9 @@ class_name SniperView
 extends Node3D
 
 const ScopeOverlayScript = preload("res://sniper_scope_overlay.gd")
+const BallisticTrace = preload("res://combat/ballistic_trace.gd")
+const MUZZLE_VELOCITY_MPS: float = 790.0
+const BULLET_GRAVITY_MPS2: float = 9.81
 const BOLT_CYCLE_SECONDS: float = 0.90
 const BOLT_TRAVEL: float = 0.070
 const BOLT_LIFT_RAD: float = 0.72
@@ -195,10 +198,10 @@ func _fire() -> void:
 	player_body.call("report_gunshot")
 	_start_bolt_cycle()
 	var origin: Vector3 = camera.global_position
-	var dest: Vector3 = origin - camera.global_transform.basis.z * MAX_RANGE
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, dest)
-	query.exclude = [player_body.get_rid()]
-	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	var direction: Vector3 = -camera.global_transform.basis.z
+	var excluded: Array[RID] = [player_body.get_rid()]
+	var hit: Dictionary = BallisticTrace.trace(get_world_3d().direct_space_state,
+		origin, direction, MAX_RANGE, MUZZLE_VELOCITY_MPS, BULLET_GRAVITY_MPS2, excluded)
 	if not hit.is_empty():
 		var target: Object = hit.get("collider")
 		if target != null and target.has_method("take_sniper_damage"):

@@ -25,3 +25,9 @@
 
 # Art installed from licensed archives remains local; do not publish third-party meshes.
 /assets/remaster_imported/
+
+# Local Python asset-conversion environment and caches.
+.venv/
+__pycache__/
+*.py[cod]
+/asset_sources/

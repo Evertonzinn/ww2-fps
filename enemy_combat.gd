@@ -192,11 +192,16 @@ func _excluded() -> Array[RID]:
 			rids.append((child as CollisionObject3D).get_rid())
 	return rids
 
+func _player_aim_point() -> Vector3:
+	# Player body origin is the centre of standing/crouching/prone capsule.
+	# A fixed +0.43m would be OUTSIDE the horizontal prone collider.
+	return player.global_position
+
 func _can_see_player() -> bool:
 	var crouch: float = float(soldier.get("combat_crouch_blend"))
 	var eye: Vector3 = soldier.global_position + Vector3.UP * (1.53 - 0.44 * crouch)
-	var target: Vector3 = player.global_position + Vector3.UP * 0.43
-	var toward: Vector3 = target - eye
+	var centre: Vector3 = _player_aim_point()
+	var toward: Vector3 = centre - eye
 	if toward.length_squared() > SIGHT_RANGE * SIGHT_RANGE:
 		return false
 	if not alert:
@@ -206,14 +211,21 @@ func _can_see_player() -> bool:
 		facing.y = 0.0
 		if a.length_squared() > 0.01 and facing.normalized().dot(a.normalized()) < 0.45:
 			return false
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(eye, target)
-	query.exclude = _excluded()
-	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
-	return not hit.is_empty() and hit.get("collider") == player
+	# These are all inside the physical capsule (including prone radius
+	# 0.29 m). Still require a ray to hit PLAYER, not a wall or a prop.
+	var state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	for offset in [0.0, 0.16, -0.16]:
+		var target: Vector3 = centre + Vector3.UP * offset
+		var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(eye, target)
+		query.exclude = _excluded()
+		var hit: Dictionary = state.intersect_ray(query)
+		if not hit.is_empty() and hit.get("collider") == player:
+			return true
+	return false
 
 func _fire(distance: float) -> void:
 	var muzzle: Vector3 = gun.to_global(Vector3(0, 0, -0.65))
-	var aim: Vector3 = player.global_position + Vector3.UP * 0.43
+	var aim: Vector3 = _player_aim_point()
 	var spread: float = 0.09 + distance * 0.022
 	aim += soldier.global_transform.basis.x * randf_range(-spread, spread)
 	aim.y += randf_range(-spread, spread)
@@ -301,7 +313,10 @@ func _create_audio() -> void:
 	data.resize(2700)
 	for i in range(data.size()):
 		var falloff: float = pow(1.0 - float(i) / float(data.size()), 2.7)
-		data[i] = clampi(int(128.0 + randf_range(-110.0, 110.0) * falloff), 0, 255)
+		# FORMAT_8_BITS uses SIGNED PCM. Encode signed sample using
+		# two's complement rather than adding a +128 DC offset.
+		var sample: int = clampi(int(randf_range(-110.0, 110.0) * falloff), -128, 127)
+		data[i] = sample & 0xff
 	sound.data = data
 	shot_audio.stream = sound
 

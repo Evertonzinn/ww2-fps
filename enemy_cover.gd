@@ -12,7 +12,7 @@ const MAX_TRAVEL: float = 13.0
 static func find_cover(world: Node3D, enemy: CollisionObject3D,
 		player: CollisionObject3D) -> Dictionary:
 	var physics: PhysicsDirectSpaceState3D = world.get_world_3d().direct_space_state
-	var player_point: Vector3 = player.global_position + Vector3.UP * 0.55
+	var player_point: Vector3 = player.global_position
 	var best: Dictionary = {}
 	var best_score: float = INF
 	var excluded: Array[RID] = [enemy.get_rid(), player.get_rid()]
@@ -26,18 +26,15 @@ static func find_cover(world: Node3D, enemy: CollisionObject3D,
 		var collider: CollisionShape3D = obstacle.get_node_or_null("CollisionShape3D") as CollisionShape3D
 		if collider == null:
 			continue
-		if not (collider.shape is BoxShape3D):
-			continue
-		var half: Vector3 = (collider.shape as BoxShape3D).size * 0.5
 		var away: Vector3 = obstacle.global_position - player.global_position
 		away.y = 0.0
 		if away.length_squared() < 0.01:
 			continue
 		away = away.normalized()
-		# Distance from box centre to its back edge along the away vector.
-		var along_x: float = half.x / maxf(0.001, absf(away.x))
-		var along_z: float = half.z / maxf(0.001, absf(away.z))
-		var edge: float = minf(along_x, along_z)
+		# Use real collider dimensions: boxes and cylindrical barrels.
+		var edge: float = _cover_edge_distance(collider.shape, away)
+		if edge <= 0.0:
+			continue
 		var location: Vector3 = obstacle.global_position + away * (edge + 0.65)
 		location.y = 0.0
 		var travel: float = enemy.global_position.distance_to(location)
@@ -63,3 +60,14 @@ static func find_cover(world: Node3D, enemy: CollisionObject3D,
 			best_score = score
 			best = {"point":location,"obstacle":obstacle.name}
 	return best
+
+# Horizontal distance from prop centre to its back face.
+static func _cover_edge_distance(shape: Shape3D, away: Vector3) -> float:
+	if shape is CylinderShape3D:
+		return (shape as CylinderShape3D).radius
+	if shape is BoxShape3D:
+		var half: Vector3 = (shape as BoxShape3D).size * 0.5
+		var along_x: float = half.x / maxf(0.001, absf(away.x))
+		var along_z: float = half.z / maxf(0.001, absf(away.z))
+		return minf(along_x, along_z)
+	return 0.0

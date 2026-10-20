@@ -1,0 +1,30 @@
+[
+  {
+    "source": "sniper_rifle_mag_1k.glb",
+    "source_sha256": "87089f34cf48c84e776e1e2ad9707a43542bbbfb9025aa6d85582dd4de13d888",
+    "output": "sniper_rifle_mag_v095_1k.glb",
+    "sha256": "7ffcd1749505a4ee1236040612e2fbefc2c6213406bdfe207cf2819c3d8fb16a",
+    "shell_triangles_before": 288,
+    "shell_triangles_after": 480,
+    "shell_surfaces_before": 3,
+    "shell_surfaces_after": 1,
+    "active_rounds": 5,
+    "retained_unreferenced_source_rounds": 2,
+    "original_binary_prefix_preserved": true,
+    "bytes": 11048088
+  },
+  {
+    "source": "sniper_rifle_mag_2k.glb",
+    "source_sha256": "6ddddc39a485bc3df40bfc790710fd66b50204451ef0fd51bcefb4a92ddd2a7e",
+    "output": "sniper_rifle_mag_v095_2k.glb",
+    "sha256": "4ab3800d4952906f21eeb06ede2931067c67b59961f56bf6dbeae102f6843bff",
+    "shell_triangles_before": 288,
+    "shell_triangles_after": 480,
+    "shell_surfaces_before": 3,
+    "shell_surfaces_after": 1,
+    "active_rounds": 5,
+    "retained_unreferenced_source_rounds": 2,
+    "original_binary_prefix_preserved": true,
+    "bytes": 29485276
+  }
+]

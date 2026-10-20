@@ -1,15 +1,25 @@
 class_name WeaponController
 extends Node3D
 
-const MAGAZINE_SIZE: int = 5
+# Lee-Enfield No.4: 10-round magazine, normally recharged with 5-round chargers.
+const MAGAZINE_SIZE: int = 10
 const STARTING_RESERVE: int = 30
+const CHARGER_SIZE: int = 5
 const MAX_RANGE: float = 90.0
 const SHOT_INTERVAL: float = 0.55
-const RELOAD_DURATION: float = 1.8
+const ACTION_DURATION: float = 0.86
+const OPEN_DURATION: float = 0.43
+const CLOSE_DURATION: float = 0.48
+const CHARGER_DURATION: float = 1.18
 const HIP_POSITION: Vector3 = Vector3(0.30, -0.28, -0.56)
 const AIM_POSITION: Vector3 = Vector3(0.0, -0.15, -0.48)
 const HIP_FOV: float = 75.0
 const AIM_FOV: float = 55.0
+
+const MODEL_DIRECTORY: String = "res://assets/weapons/lee_enfield/"
+const ReloadEffects = preload("res://weapon_reload_fx.gd")
+const SniperViewScript = preload("res://sniper_view.gd")
+const WeaponHandsScript = preload("res://weapon_hands.gd")
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -23,80 +33,169 @@ const AIM_FOV: float = 55.0
 var magazine: int = MAGAZINE_SIZE
 var reserve_ammo: int = STARTING_RESERVE
 var shot_cooldown: float = 0.0
-var reload_timer: float = 0.0
+var bolt_timer: float = 0.0
+var eject_at_remaining: float = 0.0
+var pending_ejection: bool = false
+var pending_reload: bool = false
+var bolt_open: bool = false
 var reloading: bool = false
+var reload_phase: int = 0  # 0=idle, 1=opening, 2=charger, 3=closing
+var segment_timer: float = 0.0
+var clip_rounds: int = 0
 var pending_shot: bool = false
 var recoil: float = 0.0
 var recoil_pitch: float = 0.0
 var muzzle_timer: float = 0.0
 var walk_cycle: float = 0.0
+var rifle_instance: Node3D
+var active_texture_size: int = 2
+var bolt_player: AnimationPlayer
+var action_clip: StringName = &""
+var open_clip: StringName = &""
+var close_clip: StringName = &""
+var reload_fx: RifleReloadFx
+var sniper_view: SniperView
+var sniper_equipped: bool = false
+var requested_high_texture: bool = false
+var fps_hands: FirstPersonWeaponHands
 
 func _ready() -> void:
 	position = HIP_POSITION
 	muzzle_flash.visible = false
-	_build_rifle_details()
-	shot_audio.stream = _create_placeholder_sound(true)
-	reload_audio.stream = _create_placeholder_sound(false)
+	reload_fx = ReloadEffects.new() as RifleReloadFx
+	reload_fx.name = "ReloadFx"
+	add_child(reload_fx)
+	# Without a GLB, the scene's original procedural meshes remain visible.
+	_equip_real_rifle(2)
+	shot_audio.stream = _placeholder_sound(true)
+	reload_audio.stream = _placeholder_sound(false)
 	_update_hud()
+	sniper_view = SniperViewScript.new() as SniperView
+	sniper_view.name = "SniperView"
+	add_child(sniper_view)
+	# Optional PBR-skinned hand viewmodel; visual-only, never changes
+	# ammo, camera ADS, weapon animations, hit detection or FOV.
+	fps_hands = WeaponHandsScript.new() as FirstPersonWeaponHands
+	fps_hands.name = "WeaponHands"
+	add_child(fps_hands)
+
+func select_weapon(slot: int) -> void:
+	if slot == 2:
+		if sniper_equipped or reloading or pending_reload or bolt_timer > 0.0:
+			return
+		sniper_view.quality_high = requested_high_texture
+		if not sniper_view.equip():
+			return
+		sniper_equipped = true
+		_set_legacy_rifle_visible(false)
+		if rifle_instance != null:
+			rifle_instance.visible = false
+		muzzle_flash.visible = false
+		position = Vector3.ZERO
+	elif slot == 1:
+		if not sniper_equipped or sniper_view.is_busy():
+			return
+		sniper_equipped = false
+		sniper_view.unequip()
+		if rifle_instance != null:
+			rifle_instance.visible = true
+		else:
+			_set_legacy_rifle_visible(true)
+		position = HIP_POSITION
+		_update_hud()
+
+func _set_legacy_rifle_visible(show: bool) -> void:
+	for child in get_children():
+		if child is MeshInstance3D and child != muzzle_flash:
+			(child as MeshInstance3D).visible = show
 
 func request_fire() -> void:
+	if sniper_equipped:
+		sniper_view.request_fire()
+		return
 	pending_shot = true
 
 func request_reload() -> void:
-	if reloading or magazine == MAGAZINE_SIZE or reserve_ammo <= 0:
+	if sniper_equipped:
+		sniper_view.request_reload()
 		return
-	reloading = true
-	reload_timer = RELOAD_DURATION
-	reload_audio.play()
-	_update_hud()
+	if reloading or pending_reload or magazine >= MAGAZINE_SIZE or reserve_ammo <= 0:
+		return
+	if bolt_timer > 0.0:
+		pending_reload = true
+		_update_hud()
+	else:
+		_start_reload()
 
 func _physics_process(delta: float) -> void:
+	if sniper_equipped:
+		return
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
+	bolt_timer = maxf(0.0, bolt_timer - delta)
+
+	if pending_ejection and bolt_timer <= eject_at_remaining:
+		pending_ejection = false
+		reload_fx.eject_case(global_transform, player_body)
 
 	if reloading:
-		reload_timer -= delta
-		if reload_timer <= 0.0:
-			var count: int = mini(MAGAZINE_SIZE - magazine, reserve_ammo)
-			magazine += count
-			reserve_ammo -= count
-			reloading = false
-			_update_hud()
+		match reload_phase:
+			1: # Open the action before feeding chargers.
+				if bolt_timer <= 0.0:
+					_hold_clip_end(open_clip)
+					bolt_open = true
+					_start_charger()
+			2: # Insert up to five cartridges per charger.
+				segment_timer -= delta
+				if segment_timer <= 0.0:
+					magazine += clip_rounds
+					reserve_ammo -= clip_rounds
+					reload_fx.hide_charger()
+					_update_hud()
+					if magazine < MAGAZINE_SIZE and reserve_ammo > 0:
+						_start_charger()
+					else:
+						_start_close()
+			3: # Close and lock the action before enabling fire.
+				if bolt_timer <= 0.0:
+					_hold_clip_end(close_clip)
+					reload_phase = 0
+					reloading = false
+					bolt_open = false
+					_update_hud()
+	elif pending_reload and bolt_timer <= 0.0:
+		pending_reload = false
+		_start_reload()
 
 	if pending_shot:
 		pending_shot = false
-		if not reloading and shot_cooldown <= 0.0 and magazine > 0:
+		if not reloading and not pending_reload and shot_cooldown <= 0.0 and bolt_timer <= 0.0 and magazine > 0:
 			_fire_hitscan()
 
 func _process(delta: float) -> void:
-	var aiming: bool = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	if sniper_equipped:
+		return
+	var aiming: bool = not reloading and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	var moving: bool = player_body.is_on_floor() and Vector2(player_body.velocity.x, player_body.velocity.z).length_squared() > 0.8
-
 	if moving:
-		var running: bool = Input.is_key_pressed(KEY_SHIFT)
-		walk_cycle += delta * (12.0 if running else 8.0)
-
+		walk_cycle += delta * (12.0 if Input.is_key_pressed(KEY_SHIFT) else 8.0)
 	var bob_scale: float = 0.35 if aiming else 1.0
 	var bob_x: float = sin(walk_cycle) * 0.014 * bob_scale if moving else 0.0
 	var bob_y: float = abs(cos(walk_cycle)) * 0.010 * bob_scale if moving else 0.0
-
-	var target_pos: Vector3 = AIM_POSITION if aiming else HIP_POSITION
-	target_pos += Vector3(bob_x, bob_y, recoil)
+	var destination: Vector3 = AIM_POSITION if aiming else HIP_POSITION
+	destination += Vector3(bob_x, bob_y, recoil)
 	if reloading:
-		target_pos = HIP_POSITION + Vector3(0.08, -0.22, 0.04)
-
-	position = position.lerp(target_pos, minf(1.0, delta * 12.0))
-	rotation.x = lerpf(rotation.x, -0.32 if reloading else recoil_pitch, minf(1.0, delta * 13.0))
+		destination = HIP_POSITION + Vector3(0.08, -0.12, 0.04)
+	position = position.lerp(destination, minf(1.0, delta * 12.0))
+	rotation.x = lerpf(rotation.x, -0.20 if reloading else recoil_pitch, minf(1.0, delta * 13.0))
 	rotation.z = lerpf(rotation.z, sin(walk_cycle) * 0.018 if moving else 0.0, minf(1.0, delta * 8.0))
 	view_camera.fov = lerpf(view_camera.fov, AIM_FOV if aiming else HIP_FOV, minf(1.0, delta * 10.0))
 	recoil = move_toward(recoil, 0.0, delta * 0.75)
 	recoil_pitch = move_toward(recoil_pitch, 0.0, delta * 2.2)
-
-	if muzzle_timer > 0.0:
-		muzzle_timer -= delta
-		if muzzle_timer <= 0.0:
-			muzzle_flash.visible = false
-
+	muzzle_timer = maxf(0.0, muzzle_timer - delta)
+	muzzle_flash.visible = muzzle_timer > 0.0
 	crosshair.visible = not aiming
+	if reloading and reload_phase == 2:
+		reload_fx.animate_charger(1.0 - segment_timer / CHARGER_DURATION)
 
 func _fire_hitscan() -> void:
 	magazine -= 1
@@ -104,15 +203,28 @@ func _fire_hitscan() -> void:
 	recoil = 0.10
 	recoil_pitch = 0.14
 	muzzle_timer = 0.07
-	muzzle_flash.visible = true
 	shot_audio.play()
-	_update_hud()
+	player_body.call("report_gunshot")
+
+	var auto_reload: bool = magazine == 0 and reserve_ammo > 0
+	if auto_reload and bolt_player != null and open_clip != &"":
+		_play_clip(open_clip, OPEN_DURATION)
+		eject_at_remaining = 0.21
+		bolt_open = true
+	elif bolt_player != null and action_clip != &"":
+		_play_clip(action_clip, ACTION_DURATION)
+		eject_at_remaining = 0.44
+		bolt_open = false
+	else:
+		bolt_timer = 0.0
+		eject_at_remaining = 0.0
+		bolt_open = false
+	pending_ejection = true
 
 	var origin: Vector3 = view_camera.global_position
 	var destination: Vector3 = origin - view_camera.global_transform.basis.z * MAX_RANGE
 	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, destination)
 	query.exclude = [player_body.get_rid()]
-
 	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
 	if not hit.is_empty():
 		var target: Object = hit.get("collider")
@@ -120,61 +232,169 @@ func _fire_hitscan() -> void:
 			target.call("take_damage", 1)
 			hud.call("show_hit_marker")
 
+	if auto_reload:
+		pending_reload = true
+	_update_hud()
+
+func _start_reload() -> void:
+	if reloading or magazine >= MAGAZINE_SIZE or reserve_ammo <= 0:
+		return
+	pending_reload = false
+	reloading = true
+	reload_audio.play()
+	if bolt_player != null and open_clip != &"" and not bolt_open:
+		reload_phase = 1
+		_play_clip(open_clip, OPEN_DURATION)
+	else:
+		_start_charger()
+	_update_hud()
+
+func _start_charger() -> void:
+	clip_rounds = mini(CHARGER_SIZE, mini(MAGAZINE_SIZE - magazine, reserve_ammo))
+	if clip_rounds <= 0:
+		_start_close()
+		return
+	reload_phase = 2
+	segment_timer = CHARGER_DURATION
+	reload_fx.show_charger(clip_rounds)
+	_update_hud()
+
+func _start_close() -> void:
+	reload_fx.hide_charger()
+	if bolt_player != null and close_clip != &"":
+		reload_phase = 3
+		_play_clip(close_clip, CLOSE_DURATION)
+	else:
+		reload_phase = 0
+		reloading = false
+		bolt_open = false
+		_update_hud()
+
+func _play_clip(clip: StringName, duration: float) -> void:
+	bolt_timer = duration
+	bolt_player.play(clip)
+
+func _hold_clip_end(clip: StringName) -> void:
+	if bolt_player == null or clip == &"":
+		return
+	var animation: Animation = bolt_player.get_animation(clip)
+	bolt_player.stop(true)
+	if animation != null:
+		bolt_player.seek(animation.length, true)
+
 func _update_hud() -> void:
 	ammo_label.text = "%d / %d" % [magazine, reserve_ammo]
 	if reloading:
-		ammo_label.text += "  RECARREGANDO..."
+		if reload_phase == 1:
+			ammo_label.text += "  ABRINDO FERROLHO..."
+		elif reload_phase == 2:
+			ammo_label.text += "  INSERINDO CLIP..."
+		else:
+			ammo_label.text += "  FECHANDO FERROLHO..."
+	elif pending_reload:
+		ammo_label.text += "  AGUARDANDO FERROLHO..."
+	elif magazine == 0 and reserve_ammo == 0:
+		ammo_label.text += "  SEM MUNICAO"
 
-# Efeito sonoro sintetizado apenas como placeholder; sem dependencia de arquivos/licencas.
-func _create_placeholder_sound(is_shot: bool) -> AudioStreamWAV:
+func set_texture_quality(high_quality: bool) -> bool:
+	requested_high_texture = high_quality
+	if fps_hands != null:
+		fps_hands.set_texture_quality(high_quality)
+	if sniper_equipped:
+		return sniper_view.set_texture_quality(high_quality)
+	if reloading or pending_reload or bolt_timer > 0.0:
+		return false
+	var size: int = 2 if high_quality else 1
+	if rifle_instance != null and active_texture_size == size:
+		return true
+	return _equip_real_rifle(size)
+
+func _equip_real_rifle(size: int) -> bool:
+	var sources: Array[String] = [
+		MODEL_DIRECTORY + "lee_enfield_charger_%dk.glb" % size,
+		MODEL_DIRECTORY + "lee_enfield_rigged_once_%dk.glb" % size,
+		MODEL_DIRECTORY + "lee_enfield_rigged_%dk.glb" % size,
+		MODEL_DIRECTORY + "lee_enfield_%dk.glb" % size
+	]
+	var chosen: String = ""
+	for path in sources:
+		if ResourceLoader.exists(path):
+			chosen = path
+			break
+	if chosen.is_empty():
+		return false
+	var scene: PackedScene = ResourceLoader.load(chosen) as PackedScene
+	if scene == null:
+		return false
+	var replacement: Node3D = scene.instantiate() as Node3D
+	if replacement == null:
+		return false
+	replacement.name = "LeeEnfield3D"
+	add_child(replacement)
+	replacement.position = Vector3(0.0, 0.085, -0.55)
+	if rifle_instance != null:
+		rifle_instance.queue_free()
+	rifle_instance = replacement
+	active_texture_size = size
+	_bind_animations()
+	for child in get_children():
+		if child is MeshInstance3D and child != muzzle_flash:
+			(child as MeshInstance3D).visible = false
+	muzzle_flash.position = Vector3(0.0, 0.085, -1.13)
+	return true
+
+func _bind_animations() -> void:
+	bolt_player = null
+	action_clip = &""
+	open_clip = &""
+	close_clip = &""
+	if rifle_instance == null:
+		return
+	var candidates: Array[Node] = rifle_instance.find_children("*", "AnimationPlayer", true, false)
+	for node in candidates:
+		var player: AnimationPlayer = node as AnimationPlayer
+		if player == null:
+			continue
+		for entry in player.get_animation_list():
+			var clip_name: String = String(entry)
+			var animation: Animation = player.get_animation(entry)
+			if animation == null:
+				continue
+			if clip_name.ends_with("BoltAction_Once") or clip_name.ends_with("BoltCycle"):
+				action_clip = StringName(entry)
+			elif clip_name.ends_with("BoltOpen_Once"):
+				open_clip = StringName(entry)
+			elif clip_name.ends_with("BoltClose_Once"):
+				close_clip = StringName(entry)
+			else:
+				continue
+			animation.loop_mode = Animation.LOOP_NONE
+			bolt_player = player
+		if bolt_player != null:
+			bolt_player.stop(true)
+			print("Lee-Enfield: action=", action_clip, " open=", open_clip, " close=", close_clip)
+			return
+
+func _placeholder_sound(is_shot: bool) -> AudioStreamWAV:
 	var rate: int = 22050
 	var duration: float = 0.19 if is_shot else 0.09
-	var sample_count: int = int(float(rate) * duration)
-	var raw: PackedByteArray = PackedByteArray()
-	raw.resize(sample_count * 2)
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.seed = 1944 if is_shot else 1945
-
-	for i in range(sample_count):
-		var progress: float = float(i) / float(sample_count)
-		var envelope: float = pow(1.0 - progress, 4.0 if is_shot else 5.0)
-		var noise: float = rng.randf_range(-1.0, 1.0)
+	var count: int = int(float(rate) * duration)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	var random := RandomNumberGenerator.new()
+	random.seed = 1944 if is_shot else 1945
+	for i in range(count):
+		var p: float = float(i) / float(count)
+		var envelope: float = pow(1.0 - p, 4.0 if is_shot else 5.0)
+		var noise: float = random.randf_range(-1.0, 1.0)
 		var tone: float = sin(float(i) * TAU * (110.0 if is_shot else 450.0) / float(rate))
-		var sample: float = clampf((noise * 0.80 + tone * 0.20) * envelope * 0.72, -1.0, 1.0)
+		var sample: float = clampf((noise * 0.8 + tone * 0.2) * envelope * 0.72, -1.0, 1.0)
 		var encoded: int = int(sample * 32767.0) & 0xffff
-		raw[i * 2] = encoded & 0xff
-		raw[i * 2 + 1] = (encoded >> 8) & 0xff
-
-	var stream: AudioStreamWAV = AudioStreamWAV.new()
+		data[i * 2] = encoded & 0xff
+		data[i * 2 + 1] = (encoded >> 8) & 0xff
+	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
 	stream.mix_rate = rate
 	stream.stereo = false
-	stream.data = raw
+	stream.data = data
 	return stream
-
-
-func _build_rifle_details() -> void:
-	# Detalhes simples com material proprio; podem ser trocados por um GLB.
-	var stock_wood: StandardMaterial3D = StandardMaterial3D.new()
-	stock_wood.albedo_color = Color(0.30, 0.17, 0.085)
-	stock_wood.roughness = 0.86
-	var steel: StandardMaterial3D = StandardMaterial3D.new()
-	steel.albedo_color = Color(0.19, 0.20, 0.19)
-	steel.metallic = 0.42
-	steel.roughness = 0.63
-
-	_weapon_box("WoodHandguard", Vector3(0, 0.015, -0.60), Vector3(0.125, 0.10, 0.39), stock_wood)
-	_weapon_box("FrontBand", Vector3(0, 0.018, -0.81), Vector3(0.15, 0.115, 0.058), steel)
-	_weapon_box("ReceiverTop", Vector3(0, 0.075, -0.35), Vector3(0.11, 0.035, 0.27), steel)
-	_weapon_box("TriggerPlate", Vector3(0, -0.13, -0.20), Vector3(0.085, 0.035, 0.18), steel)
-	_weapon_box("ButtPlate", Vector3(0, -0.07, 0.49), Vector3(0.17, 0.15, 0.035), steel)
-
-func _weapon_box(node_name: String, local_position: Vector3, dimensions: Vector3, surface: Material) -> void:
-	var visual: MeshInstance3D = MeshInstance3D.new()
-	visual.name = node_name
-	var shape: BoxMesh = BoxMesh.new()
-	shape.size = dimensions
-	visual.mesh = shape
-	visual.material_override = surface
-	visual.position = local_position
-	add_child(visual)

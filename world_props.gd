@@ -1,5 +1,8 @@
 extends Node3D
 
+const VillageProps = preload("res://environment/prop_builder.gd")
+const EnemySoldierScene = preload("res://enemy_soldier.tscn")
+
 # Vila de testes gerada em tempo de execucao: sem downloads, texturas ou assets externos.
 var stone: StandardMaterial3D
 var plaster: StandardMaterial3D
@@ -44,6 +47,26 @@ func _ready() -> void:
 	_barrel("BarrelRight", Vector3(6.7, 0.52, 4.0))
 	_tree("TreeWest", Vector3(-18.0, 0.0, 12.0))
 	_tree("TreeEast", Vector3(18.0, 0.0, -17.0))
+	VillageProps.populate(self, stone, timber, grass, brick)
+	# Defer instantiation until the World finishes its setup and child ready pass.
+	call_deferred("_spawn_initial_enemy")
+	print("WW2 FPS world: enemy spawn scheduled")
+
+func _spawn_initial_enemy() -> void:
+	# Idempotent: levels with an authored enemy won't create a duplicate.
+	var existing: Node3D = get_node_or_null("EnemySoldierTest") as Node3D
+	if existing != null:
+		print("WW2 FPS world: EnemySoldierTest already in tree at ", existing.global_position)
+		return
+	var soldier: Node3D = EnemySoldierScene.instantiate() as Node3D
+	if soldier == null:
+		push_error("WW2 FPS world: cannot instantiate res://enemy_soldier.tscn")
+		return
+	soldier.name = "EnemySoldierTest"
+	soldier.position = Vector3(1.0, 0.0, -4.0)
+	soldier.rotation.y = PI
+	add_child(soldier)
+	print("WW2 FPS world: EnemySoldierTest added to SceneTree at ", soldier.global_position)
 
 func _material(tint: Color) -> StandardMaterial3D:
 	var material: StandardMaterial3D = StandardMaterial3D.new()
@@ -83,18 +106,20 @@ func _house(node_name: String, x: float, z: float, wall_material: Material) -> v
 	var facade_x: float = face * 2.84
 
 	# Telhado em duas aguas: inclinacao corrigida para a cumeeira ficar no topo.
-	var roof_left: MeshInstance3D = _visual_box(house, "RoofLeft", Vector3(-1.47, 2.58, 0), Vector3(3.25, 0.19, 6.20), brick)
-	roof_left.rotation.z = 0.25
-	var roof_right: MeshInstance3D = _visual_box(house, "RoofRight", Vector3(1.47, 2.58, 0), Vector3(3.25, 0.19, 6.20), brick)
-	roof_right.rotation.z = -0.25
-	_visual_box(house, "RoofRidge", Vector3(0, 2.99, 0), Vector3(0.16, 0.17, 6.25), timber)
-	_visual_box(house, "Chimney", Vector3(-1.15, 3.14, 1.10), Vector3(0.55, 1.32, 0.55), brick)
-	_visual_box(house, "ChimneyCap", Vector3(-1.15, 3.83, 1.10), Vector3(0.72, 0.13, 0.72), stone)
+	_create_pitched_roof(house, wall_material)
+	_visual_box(house, "RoofRidge", Vector3(0, 3.45, 0), Vector3(0.12, 0.12, 6.40), timber)
+	_visual_box(house, "FasciaLeft", Vector3(-3.14, 2.27, 0), Vector3(0.15, 0.18, 6.45), timber)
+	_visual_box(house, "FasciaRight", Vector3(3.14, 2.27, 0), Vector3(0.15, 0.18, 6.45), timber)
+	var chimney_x: float = -1.45 if x < 0.0 else 1.45
+	_visual_box(house, "Chimney", Vector3(chimney_x, 3.42, 1.10), Vector3(0.55, 1.50, 0.55), brick)
+	_visual_box(house, "ChimneyCap", Vector3(chimney_x, 4.21, 1.10), Vector3(0.72, 0.13, 0.72), stone)
 
 	# Fachada: embasamento, porta, batente e emolduramento real das duas janelas.
 	_visual_box(house, "Foundation", Vector3(facade_x, -2.13, 0), Vector3(0.16, 0.48, 5.92), stone)
 	_visual_box(house, "Cornice", Vector3(facade_x, 2.17, 0), Vector3(0.18, 0.20, 5.94), stone)
-	_visual_box(house, "Door", Vector3(facade_x + face * 0.02, -1.31, 0), Vector3(0.12, 2.05, 1.10), timber)
+	_visual_box(house, "Door", Vector3(facade_x - face * 0.08, -1.31, 0), Vector3(0.12, 2.05, 1.10), timber)
+	_visual_box(house, "DoorJambLeft", Vector3(facade_x + face * 0.14, -1.30, -0.62), Vector3(0.20, 2.23, 0.13), stone)
+	_visual_box(house, "DoorJambRight", Vector3(facade_x + face * 0.14, -1.30, 0.62), Vector3(0.20, 2.23, 0.13), stone)
 	_visual_box(house, "DoorHeader", Vector3(facade_x + face * 0.04, -0.19, 0), Vector3(0.15, 0.18, 1.27), stone)
 	_visual_box(house, "DoorHandle", Vector3(facade_x + face * 0.10, -1.36, 0.37), Vector3(0.08, 0.08, 0.08), stone)
 
@@ -107,6 +132,10 @@ func _house(node_name: String, x: float, z: float, wall_material: Material) -> v
 		_visual_box(house, "WindowMullion%d" % window_index, Vector3(window_x + face * 0.06, 0.67, window_z), Vector3(0.12, 1.05, 0.06), timber)
 		_visual_box(house, "ShutterLeft%d" % window_index, Vector3(window_x, 0.69, window_z - 0.59), Vector3(0.13, 1.03, 0.25), timber)
 		_visual_box(house, "ShutterRight%d" % window_index, Vector3(window_x, 0.69, window_z + 0.59), Vector3(0.13, 1.03, 0.25), timber)
+		# Uma das casas tem janela improvisadamente fechada com tabuas.
+		if x > 0.0 and z < 0.0 and window_index == 0:
+			for plank in range(3):
+				_visual_box(house, "Board%d" % plank, Vector3(window_x + face * 0.17, 0.34 + float(plank) * 0.31, window_z), Vector3(0.11, 0.12, 1.1), timber)
 
 	# Vigas nas extremidades quebram a aparencia de cubos sem aumentar a colisao.
 	for beam_index in range(2):
@@ -221,3 +250,54 @@ func _tree(node_name: String, world_position: Vector3) -> void:
 	crown_visual.material_override = _material(Color(0.27, 0.38, 0.24))
 	crown_visual.position.y = 3.6
 	tree.add_child(crown_visual)
+
+
+func _create_pitched_roof(house: Node3D, wall_material: Material) -> void:
+	# Um telhado com aguas realmente inclinadas em vez de BoxMesh rotacionado.
+	# Mantemos a colisao simplificada do edificio para nao penalizar a GPU/CPU.
+	var roof_surface: SurfaceTool = SurfaceTool.new()
+	roof_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var z_front: float = -3.18
+	var z_back: float = 3.18
+	var west_front := Vector3(-3.22, 2.30, z_front)
+	var west_back := Vector3(-3.22, 2.30, z_back)
+	var ridge_front := Vector3(0, 3.44, z_front)
+	var ridge_back := Vector3(0, 3.44, z_back)
+	var east_front := Vector3(3.22, 2.30, z_front)
+	var east_back := Vector3(3.22, 2.30, z_back)
+	_add_roof_quad(roof_surface, west_front, west_back, ridge_back, ridge_front)
+	_add_roof_quad(roof_surface, ridge_front, ridge_back, east_back, east_front)
+	roof_surface.generate_normals()
+	var roof: MeshInstance3D = MeshInstance3D.new()
+	roof.name = "PitchedRoof"
+	roof.mesh = roof_surface.commit()
+	roof.material_override = brick
+	house.add_child(roof)
+
+	# Fechamento triangular visivel em ambas as extremidades do telhado.
+	var gable_surface: SurfaceTool = SurfaceTool.new()
+	gable_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for end_z in [-2.91, 2.91]:
+		var west := Vector3(-2.80, 2.34, end_z)
+		var east := Vector3(2.80, 2.34, end_z)
+		var peak := Vector3(0, 3.36, end_z)
+		_add_roof_triangle(gable_surface, west, east, peak)
+		_add_roof_triangle(gable_surface, peak, east, west)
+	gable_surface.generate_normals()
+	var gables: MeshInstance3D = MeshInstance3D.new()
+	gables.name = "RoofGables"
+	gables.mesh = gable_surface.commit()
+	gables.material_override = wall_material
+	house.add_child(gables)
+
+func _add_roof_quad(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+	_add_roof_triangle(surface, a, b, c)
+	_add_roof_triangle(surface, a, c, d)
+
+func _add_roof_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
+	surface.set_uv(Vector2(0.0, 0.0))
+	surface.add_vertex(a)
+	surface.set_uv(Vector2(1.0, 0.0))
+	surface.add_vertex(b)
+	surface.set_uv(Vector2(0.5, 1.0))
+	surface.add_vertex(c)

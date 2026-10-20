@@ -5,6 +5,8 @@
 [ext_resource type="Script" path="res://target.gd" id="3_target"]
 [ext_resource type="Script" path="res://world_props.gd" id="4_world"]
 [ext_resource type="Script" path="res://hud.gd" id="5_hud"]
+[ext_resource type="Script" path="res://graphics_menu.gd" id="6_graphics"]
+[ext_resource type="Script" path="res://player_body_visual.gd" id="7_body"]
 
 [sub_resource type="BoxMesh" id="GroundMesh"]
 size = Vector3(40, 1, 40)
@@ -15,6 +17,10 @@ size = Vector3(40, 1, 40)
 [sub_resource type="CapsuleShape3D" id="PlayerShape"]
 radius = 0.35
 height = 1.8
+
+[sub_resource type="CapsuleShape3D" id="PronePlayerShape"]
+radius = 0.29
+height = 1.5
 
 [sub_resource type="StandardMaterial3D" id="RifleWood"]
 albedo_color = Color(0.30, 0.14, 0.06, 1)
@@ -87,6 +93,14 @@ script = ExtResource("1_player")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
 shape = SubResource("PlayerShape")
+
+[node name="ProneCollisionShape3D" type="CollisionShape3D" parent="Player"]
+rotation = Vector3(1.5707963, 0, 0)
+disabled = true
+shape = SubResource("PronePlayerShape")
+
+[node name="BodyVisual" type="Node3D" parent="Player"]
+script = ExtResource("7_body")
 
 [node name="Head" type="Node3D" parent="Player"]
 position = Vector3(0, 0.6, 0)
@@ -244,3 +258,7 @@ theme_override_colors/font_color = Color(0.16, 0.25, 0.12, 1)
 theme_override_font_sizes/font_size = 17
 text = "ACERTO!"
 horizontal_alignment = 1
+
+[node name="GraphicsMenu" type="CanvasLayer" parent="."]
+layer = 10
+script = ExtResource("6_graphics")

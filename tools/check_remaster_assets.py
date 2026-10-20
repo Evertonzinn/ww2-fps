@@ -17,16 +17,22 @@ MODELS: dict[str, tuple[bool, tuple[str, ...]]] = {
         "assets/weapons/lee_enfield/lee_enfield_rigged_once_1k.glb",
         "assets/weapons/lee_enfield/lee_enfield_rigged_1k.glb",
         "assets/weapons/lee_enfield/lee_enfield_1k.glb",
+        "assets/weapons/lee_enfield/lee_enfield_charger_2k.glb",
+        "assets/weapons/lee_enfield/lee_enfield_rigged_once_2k.glb",
+        "assets/weapons/lee_enfield/lee_enfield_rigged_2k.glb",
+        "assets/weapons/lee_enfield/lee_enfield_2k.glb",
     )),
     "Scoped rifle": (True, (
         "assets/weapons/sniper/sniper_rifle_mag_v095_1k.glb",
         "assets/weapons/sniper/sniper_rifle_1k.glb",
+        "assets/weapons/sniper/sniper_rifle_mag_v095_2k.glb",
+        "assets/weapons/sniper/sniper_rifle_2k.glb",
     )),
     "Rigged FPS arms": (True, (
         "assets/characters/bamen_fps_arms/bamen_arms_1k.glb",
         "assets/characters/bamen_fps_arms/bamen_arms_2k.glb",
     )),
-    "British soldier lower-body": (False, (
+    "British soldier lower-body": (True, (
         "assets/characters/player_british/british_soldier_fps.glb",
     )),
 }

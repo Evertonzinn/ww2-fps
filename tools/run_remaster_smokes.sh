@@ -18,6 +18,7 @@ tests=(
   tests/v160_weapon_hands_smoke.gd
   tests/v190_remaster_smoke.gd
   tests/v200_ballistics_smoke.gd
+  tests/v210_real_assets_smoke.gd
 )
 for test in "${tests[@]}"; do
   echo "=== SMOKE $test ==="

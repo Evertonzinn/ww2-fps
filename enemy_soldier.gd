@@ -88,7 +88,8 @@ func _prepare_bone_tracks() -> void:
 		return
 	var expected: PackedStringArray = PackedStringArray([
 		"Spine", "Spine1", "Spine2", "Head", "LeftUpLeg", "RightUpLeg",
-		"LeftLeg", "RightLeg", "LeftArm", "RightArm"
+		"LeftLeg", "RightLeg", "LeftArm", "RightArm",
+		"LeftForeArm", "RightForeArm", "LeftHand", "RightHand"
 	])
 	for name in expected:
 		for index in range(rig.get_bone_count()):
@@ -110,7 +111,7 @@ func _physics_process(delta: float) -> void:
 	if pause_patrol > 0.0:
 		pause_patrol = maxf(0.0, pause_patrol - delta)
 		return
-	var destination: Vector3 = origin + Vector3(0, 0, -PATROL_LENGTH) if going_forward else origin
+	var destination: Vector3 = origin + Vector3(0, 0, PATROL_LENGTH) if going_forward else origin
 	var offset: Vector3 = destination - global_position
 	offset.y = 0.0
 	if offset.length() < 0.04:
@@ -119,8 +120,11 @@ func _physics_process(delta: float) -> void:
 		return
 	var direction: Vector3 = offset.normalized()
 	rotation.y = lerp_angle(rotation.y, atan2(-direction.x, -direction.z), minf(1.0, delta * 3.0))
-	global_position = global_position.move_toward(destination, PATROL_SPEED * delta)
-	is_walking = true
+	# Turn to face the next patrol waypoint before translating: no strafing or moonwalk.
+	var facing: Vector3 = -global_transform.basis.z
+	if facing.dot(direction) > 0.80:
+		global_position = global_position.move_toward(destination, PATROL_SPEED * delta)
+		is_walking = true
 
 func _process(delta: float) -> void:
 	if model == null:
@@ -155,19 +159,98 @@ func _update_bone_pose() -> void:
 	_pose("RightUpLeg", Vector3.RIGHT, -gait * 0.38 * walk_factor)
 	_pose("LeftLeg", Vector3.RIGHT, maxf(0.0, -gait) * 0.24 * walk_factor)
 	_pose("RightLeg", Vector3.RIGHT, maxf(0.0, gait) * 0.24 * walk_factor)
-	_pose("LeftArm", Vector3.RIGHT, -gait * 0.20 * walk_factor)
-	_pose("RightArm", Vector3.RIGHT, gait * 0.20 * walk_factor)
+	# Arms are solved to the rifle grips in the combat child, after gait.
+	# Keep a neutral natural swing if the rifle has not been created.
+	if combat == null:
+		_pose("LeftArm", Vector3.RIGHT, -gait * 0.20 * walk_factor)
+		_pose("RightArm", Vector3.RIGHT, gait * 0.20 * walk_factor)
 	_pose("Spine", Vector3.RIGHT, sin(walk_phase * 0.6) * 0.015 - flinch * 0.13)
 	_pose("Spine1", Vector3.FORWARD, sin(walk_phase * 0.5) * 0.01)
 	_pose("Spine2", Vector3.RIGHT, -flinch * 0.06)
 	_pose("Head", Vector3.UP, sin(walk_phase * 0.4) * 0.025)
 
 func _pose(name: String, axis: Vector3, angle: float) -> void:
-	if not bones.has(name):
+	if rig == null or not bones.has(name):
 		return
-	var index: int = bones[name]
+	var index: int = int(bones[name])
+	var parent_index: int = rig.get_bone_parent(index)
+	var parent_rotation: Quaternion = Quaternion.IDENTITY
+	if parent_index >= 0:
+		parent_rotation = rig.get_bone_global_pose(parent_index).basis.get_rotation_quaternion()
+	# Mixamo bone-local X is not always character-left/right. Express the
+	# desired axis in the character's world frame, then in the joint parent.
+	var world_axis: Vector3 = (global_transform.basis * axis).normalized()
+	var skeleton_axis: Vector3 = (rig.global_transform.basis.inverse() * world_axis).normalized()
+	var parent_axis: Vector3 = parent_rotation.inverse() * skeleton_axis
 	var baseline: Quaternion = initial_rotations[index]
-	rig.set_bone_pose_rotation(index, baseline * Quaternion(axis, angle))
+	rig.set_bone_pose_rotation(index, Quaternion(parent_axis.normalized(), angle) * baseline)
+
+func pose_rifle_hands(right_grip: Vector3, left_grip: Vector3) -> void:
+	if rig == null or eliminated:
+		return
+	# Solve both upper arm + forearm to real 3D grip targets; no fake arms.
+	_solve_two_bone_arm("RightArm", "RightForeArm", "RightHand",
+		right_grip, to_global(Vector3(0.43, 1.10, 0.10)))
+	_solve_two_bone_arm("LeftArm", "LeftForeArm", "LeftHand",
+		left_grip, to_global(Vector3(-0.43, 1.10, 0.08)))
+
+func _solve_two_bone_arm(upper_name: String, lower_name: String,
+		hand_name: String, hand_world: Vector3, elbow_hint_world: Vector3) -> void:
+	if not bones.has(upper_name) or not bones.has(lower_name) or not bones.has(hand_name):
+		return
+	var upper: int = int(bones[upper_name])
+	var lower: int = int(bones[lower_name])
+	var hand: int = int(bones[hand_name])
+	# Always reset to imported rest pose before solving. This prevents
+	# frame-to-frame quaternion accumulation and twisted elbows.
+	rig.set_bone_pose_rotation(upper, initial_rotations[upper])
+	rig.set_bone_pose_rotation(lower, initial_rotations[lower])
+	var shoulder: Vector3 = rig.get_bone_global_pose(upper).origin
+	var elbow: Vector3 = rig.get_bone_global_pose(lower).origin
+	var wrist: Vector3 = rig.get_bone_global_pose(hand).origin
+	var upper_length: float = shoulder.distance_to(elbow)
+	var lower_length: float = elbow.distance_to(wrist)
+	if upper_length < 0.001 or lower_length < 0.001:
+		return
+	var goal: Vector3 = rig.to_local(hand_world)
+	var hint: Vector3 = rig.to_local(elbow_hint_world)
+	var toward: Vector3 = goal - shoulder
+	var distance: float = toward.length()
+	if distance < 0.001:
+		return
+	var axis: Vector3 = toward / distance
+	var clamped: float = clampf(distance,
+		absf(upper_length - lower_length) + 0.001,
+		upper_length + lower_length - 0.001)
+	var along: float = (upper_length * upper_length
+		- lower_length * lower_length + clamped * clamped) / (2.0 * clamped)
+	var sideways: Vector3 = hint - shoulder
+	sideways -= axis * sideways.dot(axis)
+	if sideways.length_squared() < 0.00001:
+		sideways = axis.cross(Vector3.UP)
+	if sideways.length_squared() < 0.00001:
+		sideways = axis.cross(Vector3.RIGHT)
+	sideways = sideways.normalized()
+	var height: float = sqrt(maxf(0.0, upper_length * upper_length - along * along))
+	var desired_elbow: Vector3 = shoulder + axis * along + sideways * height
+	_align_bone_segment(upper, elbow - shoulder, desired_elbow - shoulder)
+	var updated_elbow: Vector3 = rig.get_bone_global_pose(lower).origin
+	var updated_wrist: Vector3 = rig.get_bone_global_pose(hand).origin
+	_align_bone_segment(lower, updated_wrist - updated_elbow, goal - updated_elbow)
+
+func _align_bone_segment(index: int, from_direction: Vector3,
+		to_direction: Vector3) -> void:
+	if from_direction.length_squared() < 0.00001 or to_direction.length_squared() < 0.00001:
+		return
+	var parent_index: int = rig.get_bone_parent(index)
+	var parent_rotation: Quaternion = Quaternion.IDENTITY
+	if parent_index >= 0:
+		parent_rotation = rig.get_bone_global_pose(parent_index).basis.get_rotation_quaternion()
+	var desired_change: Quaternion = Quaternion(from_direction.normalized(),
+		to_direction.normalized())
+	var local_change: Quaternion = parent_rotation.inverse() * desired_change * parent_rotation
+	var old_pose: Quaternion = rig.get_bone_pose_rotation(index)
+	rig.set_bone_pose_rotation(index, (local_change * old_pose).normalized())
 
 func receive_zone_damage(amount: int, region: String) -> void:
 	if eliminated or model == null or amount <= 0:

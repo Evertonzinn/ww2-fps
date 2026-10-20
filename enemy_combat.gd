@@ -19,6 +19,9 @@ var sight_time: float = 0.05
 var reaction_time: float = 0.0
 var shot_time: float = 1.5
 var last_seen: Vector3
+var right_grip: Marker3D
+var left_grip: Marker3D
+var recoil_left: float = 0.0
 
 func _ready() -> void:
 	soldier = get_parent() as AnimatableBody3D
@@ -73,14 +76,27 @@ func _physics_process(delta: float) -> void:
 		var target_yaw: float = atan2(-bearing.x, -bearing.z)
 		soldier.rotation.y = lerp_angle(soldier.rotation.y, target_yaw, minf(1.0, delta * 4.0))
 	if dist > KEEP_DISTANCE and float(soldier.get("flinch_left")) <= 0.0:
-		soldier.global_position = soldier.global_position.move_toward(destination, minf(CHASE_SPEED * delta, dist))
-		soldier.set("is_walking", true)
+		# Rotate first, then move in the direction the soldier faces:
+		# prevents sideways gliding and backwards marching.
+		var forward: Vector3 = -soldier.global_transform.basis.z
+		if forward.dot(vector.normalized()) > 0.80:
+			soldier.global_position = soldier.global_position.move_toward(
+				destination, minf(CHASE_SPEED * delta, dist - KEEP_DISTANCE))
+			soldier.set("is_walking", true)
 
 	reaction_time = maxf(0.0, reaction_time - delta)
 	shot_time = maxf(0.0, shot_time - delta)
 	if sees_player and dist <= FIRE_RANGE and reaction_time <= 0.0 and shot_time <= 0.0:
 		_fire(dist)
 		shot_time = randf_range(1.45, 2.20)
+
+func _process(delta: float) -> void:
+	if gun == null or soldier == null or bool(soldier.get("eliminated")):
+		return
+	recoil_left = maxf(0.0, recoil_left - delta)
+	gun.rotation.x = -0.045 + 0.11 * (recoil_left / 0.16)
+	if right_grip != null and left_grip != null:
+		soldier.call("pose_rifle_hands", right_grip.global_position, left_grip.global_position)
 
 func _excluded() -> Array[RID]:
 	var rids: Array[RID] = [soldier.get_rid()]
@@ -123,13 +139,17 @@ func _fire(distance: float) -> void:
 		if hit.get("collider") == player:
 			player.call("take_damage", BULLET_DAMAGE)
 	_tracer(muzzle, endpoint)
+	recoil_left = 0.16
 	shot_audio.play()
 
 func _create_gun() -> void:
 	# Temporary wooden/metal long-gun; not a licensed German rifle asset.
 	gun = Node3D.new()
 	gun.name = "EnemyRiflePrototype"
-	gun.position = Vector3(0.17, 1.27, -0.18)
+	# Orient the complete rifle muzzle-forward in the model's -Z axis,
+	# just in front of the sternum, not behind its back.
+	gun.position = Vector3(0.10, 1.33, -0.37)
+	gun.rotation.x = -0.045
 	soldier.add_child(gun)
 	var wood: StandardMaterial3D = StandardMaterial3D.new()
 	wood.albedo_color = Color(0.25, 0.12, 0.058)
@@ -153,6 +173,15 @@ func _create_gun() -> void:
 	barrel.position.z = -0.43
 	barrel.rotation.x = PI / 2.0
 	gun.add_child(barrel)
+	# IK markers in the exact same visual-gun coordinate system.
+	right_grip = Marker3D.new()
+	right_grip.name = "TriggerGrip"
+	right_grip.position = Vector3(0.02, -0.07, 0.08)
+	gun.add_child(right_grip)
+	left_grip = Marker3D.new()
+	left_grip.name = "SupportGrip"
+	left_grip.position = Vector3(-0.025, -0.06, -0.34)
+	gun.add_child(left_grip)
 
 func _box(part: String, where: Vector3, dimensions: Vector3, material: Material) -> void:
 	var node: MeshInstance3D = MeshInstance3D.new()

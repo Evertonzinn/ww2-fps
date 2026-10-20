@@ -62,6 +62,19 @@ static func _upgrade_materials(world: Node3D) -> void:
 	var stone: StandardMaterial3D = _pbr("stone_wall", Color(0.85, 0.82, 0.77), Vector3(2.0, 2.0, 1.0))
 	var plaster: StandardMaterial3D = _pbr("plaster", Color(0.88, 0.82, 0.72), Vector3(1.2, 1.5, 1.0))
 	var roof: StandardMaterial3D = _pbr("roof_tiles", Color(0.75, 0.56, 0.50), Vector3(2.5, 2.0, 1.0))
+	var ground: StandardMaterial3D = _pbr("grass_ground", Color(0.83, 0.90, 0.80), Vector3(20.0, 20.0, 1.0))
+	var bark: StandardMaterial3D = _pbr("tree_bark", Color(0.85, 0.79, 0.70), Vector3(1.0, 3.0, 1.0))
+	if ground != null:
+		var terrain: MeshInstance3D = world.get_node_or_null("Ground/MeshInstance3D") as MeshInstance3D
+		if terrain != null:
+			terrain.material_override = ground
+	if bark != null:
+		for tree_name in TREE_NAMES:
+			var tree: Node3D = world.get_node_or_null(tree_name) as Node3D
+			if tree != null:
+				for child in tree.get_children():
+					if child is MeshInstance3D and (child as MeshInstance3D).mesh is CylinderMesh:
+						(child as MeshInstance3D).material_override = bark
 	if cobble != null:
 		var road: MeshInstance3D = world.get_node_or_null("Road") as MeshInstance3D
 		if road != null:

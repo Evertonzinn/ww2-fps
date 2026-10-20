@@ -42,6 +42,14 @@ var exposure_left: float = 0.0
 var peek_exposed: bool = false
 var peek_left: float = 0.0
 var leg_injured: bool = false
+# The render/damage root may not expose its original CollisionShape3D
+# in a loaded scene, especially with collision_layer=0. Movement alone
+# uses an identical volume, without changing hitbox damage collisions.
+var movement_fallback_capsule: CapsuleShape3D
+var movement_shape_logged: bool = false
+const MOVEMENT_CAPSULE_RADIUS: float = 0.33
+const MOVEMENT_CAPSULE_HEIGHT: float = 1.8
+const MOVEMENT_CAPSULE_CENTER_Y: float = 0.9
 
 func _ready() -> void:
 	# Gait/spine pose must finish before mounting the gun and solving the arms.
@@ -419,6 +427,26 @@ func _face_towards(target: Vector3, delta: float) -> void:
 	soldier.rotation.y = lerp_angle(soldier.rotation.y,
 		atan2(-direction.x, -direction.z), minf(1.0, delta * 4.0))
 
+func _movement_capsule_shape() -> CapsuleShape3D:
+	# Authoritative dimensions are authored in enemy_soldier.tscn.
+	# The enemy root intentionally uses collision_layer=0 to allow its
+	# seven zone hitboxes to receive shots, but collision movement
+	# needs a *query* volume independent of runtime node availability.
+	var node: CollisionShape3D = soldier.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if node != null and node.shape is CapsuleShape3D:
+		if not movement_shape_logged:
+			movement_shape_logged = true
+			print("WW2 FPS enemy move sweep: original scene capsule")
+		return node.shape as CapsuleShape3D
+	if movement_fallback_capsule == null:
+		movement_fallback_capsule = CapsuleShape3D.new()
+		movement_fallback_capsule.radius = MOVEMENT_CAPSULE_RADIUS
+		movement_fallback_capsule.height = MOVEMENT_CAPSULE_HEIGHT
+	if not movement_shape_logged:
+		movement_shape_logged = true
+		print("WW2 FPS enemy move sweep: authored fallback capsule (0.33r / 1.8h)")
+	return movement_fallback_capsule
+
 func _move_towards(target: Vector3, delta: float, stop_radius: float) -> void:
 	var vector: Vector3 = target - soldier.global_position
 	vector.y = 0.0
@@ -439,13 +467,16 @@ func _move_towards(target: Vector3, delta: float, stop_radius: float) -> void:
 	var movement: float = minf(speed * delta, distance - stop_radius)
 	if movement <= 0.0:
 		return
-	var body_shape: CollisionShape3D = soldier.get_node_or_null("CollisionShape3D") as CollisionShape3D
-	if body_shape == null or body_shape.shape == null:
-		push_warning("Enemy movement blocked: original capsule collider missing")
-		return
 	var sweep: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
-	sweep.shape = body_shape.shape
-	sweep.transform = body_shape.global_transform
+	sweep.shape = _movement_capsule_shape()
+	# For missing source nodes, reconstruct the existing authored
+	# collision centre at soldier origin + 0.90m (foot-ground root).
+	var collider: CollisionShape3D = soldier.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	var capsule_transform: Transform3D = soldier.global_transform * Transform3D(
+		Basis.IDENTITY, Vector3(0.0, MOVEMENT_CAPSULE_CENTER_Y, 0.0))
+	if collider != null and collider.shape is CapsuleShape3D:
+		capsule_transform = collider.global_transform
+	sweep.transform = capsule_transform
 	sweep.motion = direction * movement
 	sweep.collision_mask = 1
 	sweep.collide_with_bodies = true

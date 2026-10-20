@@ -20,10 +20,16 @@ func _run() -> void:
 		_fail("soldier or EnemyCombat missing")
 		return
 	combat.set_physics_process(false)
-	var original_collision: CollisionShape3D = soldier.get_node_or_null("CollisionShape3D") as CollisionShape3D
-	if original_collision == null or not original_collision.shape is CapsuleShape3D:
-		_fail("enemy capsule shape missing")
+	# The imported scene can lack the root CollisionShape3D at runtime.
+	# Movement must still use the authored physical capsule dimensions.
+	var used_shape: CapsuleShape3D = combat.call("_movement_capsule_shape") as CapsuleShape3D
+	if used_shape == null:
+		_fail("no usable movement capsule query shape")
 		return
+	if absf(used_shape.radius - 0.33) > 0.001 or absf(used_shape.height - 1.8) > 0.001:
+		_fail("movement sweep shape differs from authored 0.33r / 1.8h")
+		return
+	print("PASS: movement has the authored enemy capsule, scene node optional")
 	var start: Vector3 = Vector3(1.0, 0.0, -4.0)
 	soldier.global_position = start
 	soldier.rotation.y = PI

@@ -69,6 +69,25 @@ func _test() -> void:
 		return
 	print("PASS: C crouches, vertical collision and silent speed")
 
+	var key_space: InputEventKey = InputEventKey.new()
+	key_space.physical_keycode = KEY_SPACE
+	key_space.pressed = true
+	if posture.call("handle_input", key_space) != true or posture.call("is_standing") != true:
+		_fail("Space did not raise crouched player to standing")
+		return
+	if posture.call("allows_jump_from_space") != false:
+		_fail("rising Space also enabled jump")
+		return
+	key_space.pressed = false
+	posture.call("handle_input", key_space)
+	if posture.call("allows_jump_from_space") != true:
+		_fail("Space release did not rearm normal jump")
+		return
+	if posture.call("handle_input", key_c) != true or int(posture.get("stance")) != 1:
+		_fail("C cannot return to crouch after Space rise")
+		return
+	print("PASS: Space crouch->stand, jump suppressed until release")
+
 	var key_ctrl: InputEventKey = InputEventKey.new()
 	key_ctrl.physical_keycode = KEY_CTRL
 	key_ctrl.pressed = true
@@ -92,6 +111,17 @@ func _test() -> void:
 		return
 	print("PASS: Ctrl prone, horizontal capsule, crawl speed and low camera")
 
+	key_space.pressed = true
+	if posture.call("handle_input", key_space) != true or int(posture.get("stance")) != 1:
+		_fail("Space did not rise from prone to crouch")
+		return
+	key_space.pressed = false
+	posture.call("handle_input", key_space)
+	if posture.call("handle_input", key_ctrl) != true or int(posture.get("stance")) != 2:
+		_fail("Ctrl failed to return to prone after Space")
+		return
+	print("PASS: Space prone->crouch, Ctrl still enters prone")
+
 	# Leaving prone with Ctrl enters crouch, avoiding accidental stand-up.
 	if not bool(posture.call("handle_input", key_ctrl)) or int(posture.get("stance")) != 1:
 		_fail("Ctrl did not return prone soldier to crouch")
@@ -107,9 +137,15 @@ func _test() -> void:
 	world.add_child(ceiling)
 	ceiling.global_position = Vector3(player.global_position.x, 1.65, player.global_position.z)
 	await physics_frame
-	if bool(posture.call("request_stance", 0)):
-		_fail("standing under a solid low ceiling was allowed")
+	key_space.pressed = true
+	if posture.call("handle_input", key_space) != true or int(posture.get("stance")) != 1:
+		_fail("Space bypassed low ceiling or was not handled")
 		return
+	if posture.call("allows_jump_from_space") != false:
+		_fail("Space attempted to jump under low ceiling")
+		return
+	key_space.pressed = false
+	posture.call("handle_input", key_space)
 	if int(posture.get("stance")) != 1:
 		_fail("ceiling rejection incorrectly changed stance")
 		return
@@ -117,9 +153,15 @@ func _test() -> void:
 	ceiling.queue_free()
 	await physics_frame
 
-	if not bool(posture.call("handle_input", key_c)) or not bool(posture.call("is_standing")):
-		_fail("C did not return player to standing")
+	key_space.pressed = true
+	if posture.call("handle_input", key_space) != true or posture.call("is_standing") != true:
+		_fail("Space did not return player to standing after ceiling cleared")
 		return
+	if posture.call("allows_jump_from_space") != false:
+		_fail("post-ceiling Space incorrectly enabled jump")
+		return
+	key_space.pressed = false
+	posture.call("handle_input", key_space)
 	if standing.disabled or not prone.disabled:
 		_fail("standing collider was not restored")
 		return

@@ -97,7 +97,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
-	elif stance_controller != null and bool(stance_controller.call("is_standing")) and Input.is_key_pressed(KEY_SPACE):
+	elif stance_controller != null and Input.is_key_pressed(KEY_SPACE) and stance_controller.call("allows_jump_from_space") == true:
 		velocity.y = JUMP_SPEED
 
 	var input_dir := Vector2.ZERO

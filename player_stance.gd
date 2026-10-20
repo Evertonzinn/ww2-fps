@@ -24,6 +24,8 @@ var prone_shape: CapsuleShape3D
 var head: Node3D
 var last_step_position: Vector3 = Vector3.ZERO
 var step_progress: float = 0.0
+# The Space press used to rise must not also trigger a jump until release.
+var space_used_for_rise: bool = false
 var last_standing_camera: Vector3 = Vector3(0.0, 0.6, 0.0)
 
 func _ready() -> void:
@@ -67,12 +69,22 @@ func handle_input(event: InputEvent) -> bool:
 	if not event is InputEventKey:
 		return false
 	var key_event: InputEventKey = event as InputEventKey
-	if not key_event.pressed or key_event.echo:
-		return false
-	# Physical Ctrl on Debian, including either left or right Control.
 	var code: int = key_event.physical_keycode
 	if code == KEY_NONE:
 		code = key_event.keycode
+	if code == KEY_SPACE and not key_event.pressed:
+		space_used_for_rise = false
+		return false
+	if not key_event.pressed or key_event.echo:
+		return false
+	if code == KEY_SPACE:
+		# Prone -> crouch, crouch -> stand. One stance per press.
+		# Clearance checks remain active, including ceilings.
+		if stance != Stance.STAND:
+			space_used_for_rise = true
+			request_stance(Stance.CROUCH if stance == Stance.PRONE else Stance.STAND)
+			return true
+		return false
 	if code == KEY_C:
 		if stance == Stance.CROUCH:
 			request_stance(Stance.STAND)
@@ -183,6 +195,9 @@ func _space_is_available(requested: Stance) -> bool:
 
 func is_standing() -> bool:
 	return stance == Stance.STAND
+
+func allows_jump_from_space() -> bool:
+	return stance == Stance.STAND and not space_used_for_rise
 
 func movement_speed(sprinting: bool, standard_walk: float, standard_run: float) -> float:
 	match stance:

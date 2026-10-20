@@ -25,7 +25,7 @@ const MAX_REACH: float = 0.96
 @export_range(-180.0, 180.0, 1.0) var rig_yaw_degrees: float = 0.0
 @export var enable_rigged_hands: bool = true
 
-var weapon: WeaponController
+var weapon: Variant
 var model_root: Node3D
 var skeleton: Skeleton3D
 var right_target: Marker3D
@@ -42,8 +42,10 @@ var active_quality: int = 0
 var reach_limited_frames: int = 0
 
 func _ready() -> void:
-	weapon = get_parent() as WeaponController
-	if weapon == null:
+	weapon = get_parent()
+	# The weapon script preloads this file. Keep this reference dynamic to
+	# avoid an import cycle (WeaponController -> FirstPersonWeaponHands -> WeaponController).
+	if weapon == null or not weapon.has_method("select_weapon"):
 		push_warning("FPS hands disabled: expected WeaponController parent")
 		return
 	right_target = Marker3D.new()

@@ -3,10 +3,10 @@ extends Node3D
 # v0.15: optional body-awareness preview. Real meshes stay in a local GLB,
 # never in the Git repository. No weapon or camera transforms are changed.
 const MODEL_PATH: String = "res://assets/characters/player_british/british_soldier_fps.glb"
-const REQUIRED: PackedStringArray = PackedStringArray([
+const REQUIRED = [
 	"CC_Base_L_Thigh", "CC_Base_R_Thigh", "CC_Base_L_Calf",
 	"CC_Base_R_Calf", "CC_Base_L_Hand", "CC_Base_R_Hand", "CC_Base_Head"
-])
+]
 @export_range(-180.0, 180.0, 1.0) var body_yaw_degrees: float = 0.0
 @export var conceal_unbound_fps_arms: bool = true
 @export var preview_walk_legs: bool = true

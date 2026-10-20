@@ -8,6 +8,7 @@ const HIT_DURATION: float = 0.16
 
 var fps_refresh_timer: float = 0.0
 var hit_timer: float = 0.0
+var stance_readout: Label
 var health_readout: Label
 var damage_overlay: ColorRect
 var damage_strength: float = 0.0
@@ -43,6 +44,13 @@ func _make_player_hud() -> void:
 	health_readout.add_theme_font_size_override("font_size", 20)
 	health_readout.add_theme_color_override("font_color", Color(0.95, 0.94, 0.85))
 	add_child(health_readout)
+	stance_readout = Label.new()
+	stance_readout.name = "PlayerStance"
+	stance_readout.position = Vector2(12.0, 70.0)
+	stance_readout.add_theme_color_override("font_color", Color(0.78, 0.91, 0.79))
+	stance_readout.add_theme_font_size_override("font_size", 15)
+	stance_readout.text = "EM PE  |  SHIFT PARA CORRER"
+	add_child(stance_readout)
 
 	damage_overlay = ColorRect.new()
 	damage_overlay.name = "DamageFlash"
@@ -101,3 +109,7 @@ func show_player_death() -> void:
 	death_panel.visible = true
 	damage_overlay.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func show_player_stance(posture: String, movement_note: String) -> void:
+	if stance_readout != null:
+		stance_readout.text = posture + "  |  " + movement_note

@@ -56,6 +56,8 @@ func _ready() -> void:
 	magazine = MAGAZINE_SIZE
 	if player.has_signal("gunshot"):
 		player.connect("gunshot", Callable(self, "_on_player_gunshot"))
+	if player.has_signal("footstep"):
+		player.connect("footstep", Callable(self, "_on_player_footstep"))
 	_create_gun()
 	_create_audio()
 	print("WW2 FPS enemy combat READY")
@@ -327,14 +329,25 @@ func _tracer(start: Vector3, target: Vector3) -> void:
 			tracer.queue_free()
 	)
 
-func _alert_at(location: Vector3, from_sound: bool) -> void:
+func _alert_at(location: Vector3, from_sound: bool, sound_type: String = "SHOT") -> void:
 	alert = true
 	last_seen = location
 	lost_time = 7.0 if from_sound else 6.0
 	reaction_time = 0.90
 	shot_time = 0.90
 	tactic = Tactic.INVESTIGATE if from_sound else Tactic.ADVANCE
-	print("WW2 FPS enemy ", "HEARD SHOT" if from_sound else "ALERT")
+	print("WW2 FPS enemy ", "HEARD " + sound_type if from_sound else "ALERT")
+
+func _on_player_footstep(location: Vector3, hearing_radius: float) -> void:
+	if soldier == null or bool(soldier.get("eliminated")) or player == null:
+		return
+	if soldier.global_position.distance_to(location) > hearing_radius:
+		return
+	if not alert:
+		_alert_at(location, true, "FOOTSTEPS")
+	elif not sees_player and tactic == Tactic.INVESTIGATE:
+		last_seen = location
+		lost_time = maxf(lost_time, 4.0)
 
 func _on_player_gunshot(location: Vector3) -> void:
 	if soldier == null or bool(soldier.get("eliminated")):

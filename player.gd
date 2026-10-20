@@ -1,6 +1,9 @@
 extends CharacterBody3D
 
 signal gunshot(location: Vector3)
+signal footstep(location: Vector3, hearing_radius: float)
+
+const StanceControllerScript = preload("res://player_stance.gd")
 
 const WALK_SPEED: float = 5.0
 const RUN_SPEED: float = 8.0
@@ -11,6 +14,7 @@ const MOUSE_SENSITIVITY: float = 0.002
 @export_range(1, 500, 1) var max_health: int = 100
 var health: int = 100
 var is_dead: bool = false
+var stance_controller: Node
 
 @onready var head: Node3D = $Head
 @onready var weapon: WeaponController = $Head/Camera3D/Weapon
@@ -18,6 +22,9 @@ var is_dead: bool = false
 
 func _ready() -> void:
 	health = max_health
+	stance_controller = StanceControllerScript.new() as Node
+	stance_controller.name = "StanceController"
+	add_child(stance_controller)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	call_deferred("_update_health_hud")
 
@@ -29,6 +36,10 @@ func _update_health_hud() -> void:
 func report_gunshot() -> void:
 	if not is_dead:
 		gunshot.emit(global_position)
+
+func report_footstep(hearing_radius: float) -> void:
+	if not is_dead and hearing_radius > 0.0:
+		footstep.emit(global_position, hearing_radius)
 
 func take_damage(amount: int) -> void:
 	if is_dead or amount <= 0:
@@ -56,6 +67,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
 		head.rotation.x = clampf(head.rotation.x, -1.4, 1.4)
 
+	if stance_controller != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED 			and not graphics_menu.is_open and stance_controller.call("handle_input", event):
+		get_viewport().set_input_as_handled()
+		return
+
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
 			graphics_menu.open_menu()
@@ -82,7 +97,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
-	elif Input.is_key_pressed(KEY_SPACE):
+	elif stance_controller != null and bool(stance_controller.call("is_standing")) and Input.is_key_pressed(KEY_SPACE):
 		velocity.y = JUMP_SPEED
 
 	var input_dir := Vector2.ZERO
@@ -98,6 +113,10 @@ func _physics_process(delta: float) -> void:
 	input_dir = input_dir.normalized()
 	var direction: Vector3 = (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 	var speed: float = RUN_SPEED if Input.is_key_pressed(KEY_SHIFT) else WALK_SPEED
+	if stance_controller != null:
+		speed = float(stance_controller.call("movement_speed", Input.is_key_pressed(KEY_SHIFT), WALK_SPEED, RUN_SPEED))
 	velocity.x = direction.x * speed
 	velocity.z = direction.z * speed
 	move_and_slide()
+	if stance_controller != null:
+		stance_controller.call("record_movement")

@@ -1,0 +1,50 @@
+name: WW2 remaster validation
+on:
+  push:
+    branches:
+      - feature/v210-authentic-asset-integration-20261020
+  pull_request:
+    paths:
+      - '**.gd'
+      - 'tools/**'
+      - 'tests/**'
+      - 'project.godot'
+      - '.github/workflows/remaster-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safe-importer:
+    name: Python import safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python tools
+        run: python3 -m compileall -q tools tests/test_remaster_pipeline.py
+      - name: Run offline tests
+        run: python3 -m unittest discover -s tests -p 'test_remaster_pipeline.py' -v
+
+  godot-ballistics:
+    name: Godot 4.7.2 smoke (no vendor assets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Godot 4.7.2 Linux binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/godot.zip \
+            'https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip'
+          mkdir -p /tmp/ww2-godot
+          unzip -q /tmp/godot.zip -d /tmp/ww2-godot
+          chmod +x /tmp/ww2-godot/Godot_v4.7.2-stable_linux.x86_64
+          /tmp/ww2-godot/Godot_v4.7.2-stable_linux.x86_64 --version
+      - name: Import editor resources
+        run: /tmp/ww2-godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --import
+      - name: Ballistic and damage smoke
+        run: /tmp/ww2-godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/v200_ballistics_smoke.gd

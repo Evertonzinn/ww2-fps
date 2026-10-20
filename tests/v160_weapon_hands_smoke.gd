@@ -80,13 +80,13 @@ func _run() -> void:
 	print("WW2 FPS HANDS GRIP CLAMP: Lee right=%.3fm left=%.3fm" % [
 		lee_right_clamp, lee_left_clamp
 	])
-	if lee_right_clamp > 0.12 or lee_left_clamp > 0.12:
+	if lee_right_clamp > 0.001 or lee_left_clamp > 0.001:
 		_fail("IK targets are clamped too far from actual rifle grips")
 		return
 	if not is_finite(lee_right_error) or not is_finite(lee_left_error):
 		_fail("Lee grip IK produced non-finite wrist positions")
 		return
-	if lee_right_error > 0.10 or lee_left_error > 0.10 or hands.pose_safe != true:
+	if lee_right_error > 0.025 or lee_left_error > 0.025 or hands.pose_safe != true:
 		_fail("Lee wrists did not reach weapon grips (right=%.3fm left=%.3fm)" % [
 			lee_right_error, lee_left_error
 		])
@@ -129,12 +129,39 @@ func _run() -> void:
 	if not is_finite(sniper_right_error) or not is_finite(sniper_left_error):
 		_fail("sniper IK produced non-finite wrist positions")
 		return
-	if sniper_right_error > 0.10 or sniper_left_error > 0.10 or hands.pose_safe != true:
+	if sniper_right_error > 0.025 or sniper_left_error > 0.025 or hands.pose_safe != true:
 		_fail("sniper wrists did not reach weapon grips (right=%.3fm left=%.3fm)" % [
 			sniper_right_error, sniper_left_error
 		])
 		return
 	print("PASS: sniper selection retains two real wrist grip poses")
+	# The old test omitted sniper target displacement and accepted 10cm wrist error.
+	# Moving the actual SniperView must update contact markers on this same frame.
+	var view: SniperView = rifle.sniper_view
+	var original_transform: Transform3D = view.transform
+	var original_fov: float = rifle.view_camera.fov
+	var original_ammo: int = view.magazine
+	var was_processing: bool = view.is_processing()
+	view.set_process(false)
+	for offset in [Vector3.ZERO, Vector3(0.0, 0.0, 0.11), Vector3(-0.27, 0.18, 0.09)]:
+		view.transform = original_transform
+		view.position += offset
+		hands._process(1.0 / 120.0)
+		if hands.right_target.position.distance_to(hands._target_right()) > 0.001 or hands.left_target.position.distance_to(hands._target_left()) > 0.001:
+			_fail("sniper contact markers lag behind or are clamped away from moving rifle")
+			return
+		var intended_transform: Transform3D = view.transform
+		for sample in range(8):
+			await process_frame
+		if hands.ik_right_error > 0.025 or hands.ik_left_error > 0.025 or hands.pose_safe != true:
+			_fail("final sniper wrists miss the requested grips during viewmodel motion")
+			return
+		if not view.transform.is_equal_approx(intended_transform) or view.magazine != original_ammo or rifle.view_camera.fov != original_fov:
+			_fail("hands changed rifle transform, ammunition or camera FOV")
+			return
+	view.transform = original_transform
+	view.set_process(was_processing)
+	print("PASS: sniper grip targets follow recoil/ADS displacement without target clamping")
 	rifle.select_weapon(1)
 	hands._process(0.2)
 	if rifle.sniper_equipped or rifle.magazine != lee_ammo:

@@ -59,6 +59,11 @@ func hide_charger() -> void:
 		active_charger.queue_free()
 	active_charger = null
 
+func get_charger_position() -> Vector3:
+	if active_charger != null and is_instance_valid(active_charger):
+		return active_charger.position
+	return Vector3(0.03, 0.22, -0.46)
+
 func eject_case(weapon_transform: Transform3D, player_body: CharacterBody3D) -> void:
 	var origin: Vector3 = weapon_transform * Vector3(0.13, 0.11, -0.34)
 	var right: Vector3 = weapon_transform.basis.x.normalized()

@@ -18,6 +18,7 @@ const AIM_FOV: float = 55.0
 
 const MODEL_DIRECTORY: String = "res://assets/weapons/lee_enfield/"
 const ReloadEffects = preload("res://weapon_reload_fx.gd")
+const ArmsVisual = preload("res://weapon_arms.gd")
 
 @onready var view_camera: Camera3D = get_parent() as Camera3D
 @onready var player_body: CharacterBody3D = view_camera.get_parent().get_parent() as CharacterBody3D
@@ -52,6 +53,7 @@ var action_clip: StringName = &""
 var open_clip: StringName = &""
 var close_clip: StringName = &""
 var reload_fx: RifleReloadFx
+var first_person_arms: FirstPersonArms
 
 func _ready() -> void:
 	position = HIP_POSITION
@@ -59,6 +61,10 @@ func _ready() -> void:
 	reload_fx = ReloadEffects.new() as RifleReloadFx
 	reload_fx.name = "ReloadFx"
 	add_child(reload_fx)
+	# Arms are attached to Weapon: aim, sway and recoil remain synchronized.
+	first_person_arms = ArmsVisual.new() as FirstPersonArms
+	first_person_arms.name = "FirstPersonArms"
+	add_child(first_person_arms)
 	# Without a GLB, the scene's original procedural meshes remain visible.
 	_equip_real_rifle(2)
 	shot_audio.stream = _placeholder_sound(true)
@@ -142,6 +148,8 @@ func _process(delta: float) -> void:
 	crosshair.visible = not aiming
 	if reloading and reload_phase == 2:
 		reload_fx.animate_charger(1.0 - segment_timer / CHARGER_DURATION)
+	if first_person_arms != null:
+		first_person_arms.update_pose(reloading, reload_phase, reload_fx.get_charger_position(), delta)
 
 func _fire_hitscan() -> void:
 	magazine -= 1
